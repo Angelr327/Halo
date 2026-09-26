@@ -4,3 +4,9 @@ __pycache__/
 *.csv
 rec_*.mp4
 *_openvino_model/
+.DS_Store
+xcuserdata/
+*.xcuserstate
+DerivedData/
+.build/
+.swiftpm/
