@@ -4,6 +4,9 @@ __pycache__/
 *.csv
 rec_*.mp4
 *_openvino_model/
+*_ncnn_model/
+check_*.jpg
+orientation_check.jpg
 .DS_Store
 xcuserdata/
 *.xcuserstate

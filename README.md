@@ -127,7 +127,9 @@ A bare 2-pin buzzer is wired the same way (buzzer + to 5V, − to the collector,
 Buzzer and vibration modules with 3 pins (VCC, GND, IN/I/O) have the transistor built in:
 IN goes straight to the Uno pin.
 
-Check it before mounting: flash the sketch, then `python -m tools.bench serial` on the Pi.
+Check it before mounting: flash the sketch from the Pi with `bash scripts/flash_arduino.sh`
+(no Arduino IDE needed; `bash scripts/flash_arduino.sh hcsr04_test` for the sensor test), then
+`python -m tools.bench serial` on the Pi.
 You should feel left then right at power-up; `l` / `r` buzz each side (strong also beeps);
 `u` prints the four distances (wave a hand in front of each sensor); `z0` mutes the buzzers.
 Total draw is roughly 250 mA from the Pi's USB (see the power note above).
