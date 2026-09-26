@@ -1,0 +1,7 @@
+ultralytics>=8.4          # YOLOv8 / YOLO11 / YOLO26 weights, same result.boxes API
+opencv-python>=4.9
+numpy
+pyserial>=3.5
+google-genai>=2.20        # tested with 2.25; uses client.models.generate_content
+sounddevice               # optional: push-to-talk voice questions (key V)
+comtypes; platform_system == "Windows"   # Windows speech (SAPI)

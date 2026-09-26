@@ -1,0 +1,177 @@
+# Blind-spot helmet
+
+Rear-facing camera → local YOLO detection → directional haptics, a rear light that warns the
+driver, and short spoken alerts. Gemini adds language on top, asynchronously, and is never
+in the safety path.
+
+```
+FAST PATH (every frame, ~70-120 ms, no network)
+camera ─► mirror ─► global-motion ─► YOLO ─► tracker ─► TTC / zone ─► policy ─► motors + light + "Truck left!"
+                                                                          │
+SLOW PATH (events only, ~1-2 s, optional)                                 ▼ submit (non-blocking)
+                            GeminiGateway: budget ▸ min interval ▸ coalesce ▸ expire ▸ circuit breaker
+                                                                          │
+                          drained next frame through guardrails ◄─────────┘  ("Box truck passing close on your left")
+```
+
+## Raspberry Pi (current target)
+
+The Pi replaces the laptop. The Arduino stays: it's the independent watchdog that turns
+the light into a normal bike light if the Pi crashes, and NeoPixel timing is easy there.
+
+```bash
+git clone <your repo> ~/blindspot-helmet && cd ~/blindspot-helmet
+bash scripts/setup_pi.sh             # apt + venv + pip + NCNN export + all tests (needs internet)
+. .venv/bin/activate
+python -m helmet.main --video clip.mp4 --loop     # works with NO camera, Arduino, or headphones
+```
+
+Then open the printed `http://<pi-ip>:8080` on a phone or laptop on the same network:
+live overlay plus buttons for every key command. On the Pi's own desktop, add `--window`
+for the normal OpenCV window.
+
+What changes automatically on a Pi (`config.IS_PI`):
+- **Detector**: `yolo26n.pt` exported once to NCNN (`yolo26n_imgsz320_ncnn_model/`), `IMGSZ = 320`.
+  Benchmark with `python -m tools.bench yolo --video clip.mp4` and use the largest size that
+  keeps you at 8+ FPS end to end.
+- **Camera**: a Camera Module (3 Wide recommended: light, ~120 deg) is used if present,
+  else the USB webcam. Force with `--camera-source usb|picamera2`.
+- **Display**: headless + web view; drawing is skipped entirely when nobody is watching.
+- **Speech**: `espeak-ng` through the default audio output (pair the Bluetooth headset in the
+  desktop's Bluetooth menu or with `bluetoothctl`).
+
+Auto-start at boot (no laptop at all): see `deploy/helmet.service`.
+
+**Power, the #1 Pi gotcha.** On a normal 5V/3A supply or power bank, the Pi 5 caps total USB
+current at 600 mA. The C920 plus the Arduino with motors and LEDs can exceed that, and the
+symptom is a camera or serial port that randomly drops. Use the official 27 W supply for the
+stationary demo. On a power bank, the Camera Module (CSI, not USB) removes the webcam's
+draw. Adding `usb_max_current_enable=1` to `/boot/firmware/config.txt` lifts the cap at
+your own risk.
+
+**Heat.** Continuous YOLO throttles an uncooled Pi 5 within minutes. Fit the Active Cooler
+and watch `vcgencmd measure_temp`.
+
+## Setup (laptop)
+
+```bash
+python -m venv .venv && source .venv/bin/activate        # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+cp .env.example .env                                       # paste your Gemini key
+python -m tests.test_synthetic && python -m tests.test_gateway && python -m tests.test_headless   # no hardware needed
+```
+
+Flash `firmware/helmet_arduino/helmet_arduino.ino` with the Arduino IDE (install
+**Adafruit NeoPixel** from the Library Manager; board "Arduino Nano", processor
+"ATmega328P" or "ATmega328P (Old Bootloader)" for most clones). On power-up you should feel
+LEFT then RIGHT.
+
+## Run
+
+```bash
+python -m helmet.main                          # live camera, auto-detects the Arduino
+python -m helmet.main --demo-person            # stationary demo: walking teammates count as vehicles
+python -m helmet.main --video clip.mp4 --loop  # recorded footage (real-time paced, video timestamps)
+python -m helmet.main --no-gemini              # prove it works fully offline
+python -m helmet.main --agent                  # Gemini tool calling
+python -m helmet.main --log run.csv            # per-frame metrics for calibration
+python -m helmet.main --model yolo26n.pt       # swap detector
+```
+
+| Key | Action | Key | Action |
+|---|---|---|---|
+| q / Esc | quit | f | simulate camera failure |
+| g | "What's behind me?" (Gemini, or local answer offline) | k | kill heartbeat → Arduino failsafe |
+| v | voice question (3 s, laptop mic) | x | Gemini on/off |
+| t | haptic test: left, right, both | a | describe ↔ agent mode |
+| l | cycle light override | m | mirror on/off |
+| p | cycle sensitivity profile | c | hot-reload `config.py` |
+| space | pause video | r | record the debug window to MP4 |
+| d | hide/show metrics panel | | |
+
+The handlebar button (D3 to GND) does the same as **g**. Headless, the same commands are buttons in the web view.
+
+## Wiring (no soldering)
+
+| Part | Pin on part | Nano pin |
+|---|---|---|
+| Left vibration module | IN / SIG | D5 |
+| Right vibration module | IN / SIG | D6 |
+| NeoPixel stick (8 LED) | DIN | D2 (330 Ω in series if you have one) |
+| Optional button | one leg | D3 (other leg → GND) |
+| All modules | VCC / 5V | 5V |
+| All modules | GND | GND |
+
+Three devices share 5V and GND: use a Nano I/O expansion shield (every pin has its own
+S-V-G header) or a mini breadboard. Everything runs from the laptop's USB (< 400 mA).
+Bare coin motors (no module) need an NPN transistor or logic-level MOSFET plus a flyback
+diode each. Never drive a motor straight from a pin.
+
+## Serial protocol (57600 baud, newline-terminated)
+
+`L<n>` `R<n>` `B<n>` haptics (0 stop, 1 gentle, 2 medium, 3 strong, 4 fault) ·
+`M<n>` light 0 normal / 1 alert / 2 danger (sent every 250 ms = heartbeat) ·
+`F1`/`F0` host fault · `X` all off · `?` status.
+Board replies `READY`, `BTN`, `FAILSAFE`, `LINK OK`, `ERR <line>`.
+No command for 1.5 s → the light becomes a normal flashing bike light and both motors
+give a long buzz.
+
+## Calibration procedure
+
+Tune by watching numbers, not by guessing. Every metric is in the side panel:
+`grow` (late/early size ratio), `cons` (fraction of frames that grew), `TTC`, `dist`,
+`lat` (lateral offset, − = your left), `clr` (passing clearance), zone, tier and the reason.
+Run with `--demo-person --no-gemini --log calib.csv`, edit `helmet/config.py`, press **c**.
+
+**Setup.** Tape marks on the floor behind the helmet at 2, 4, 6, 8, 10 m on a centre line,
+plus a parallel line 1.5 m to the left and right. Helmet at head height (≈1.6 m), camera
+level and pointing straight back.
+
+1. **Orientation.** A teammate stands on the LEFT line. The box must be on the left half
+   with negative `lat` and zone `LEFT`. If not, press **m** and set `MIRROR_VIEW` to match.
+   Press **t** while wearing the helmet: you must feel left, right, then both.
+2. **Jitter floor.** Teammate stands still at 4 m for 10 s. Watch `grow` and `cons`.
+   Set `MIN_GROWTH_RATIO` a little above the highest `grow` you see (typically 1.05-1.08)
+   and `MIN_CONSISTENCY` above the highest `cons` (typically 0.55-0.65). TTC should
+   read `inf` or > 20 s nearly all the time.
+3. **TTC accuracy.** Teammate walks from 10 m straight at the camera at a steady pace
+   while someone films the screen. TTC should count down about 1 s per second and
+   reach ~0 at the helmet. Reading consistently high = lag: shorten `HISTORY_LEN`.
+   Jumpy = lengthen it.
+4. **Lateral.** Stand on the 1.5 m side line at 3, 6 and 9 m. `lat` should read
+   about ±1.5 m at every distance (it is distance-independent). If it's biased, the camera
+   is yawed; if it's scaled, fix `CLASS_WIDTH_M` for that class.
+5. **Distance (optional).** At a measured distance D, read the box width w px:
+   `FOCAL_PX = w * D / real_width_m`. Best done with a real car (1.8 m) in a parking lot.
+6. **Shake.** Wear the helmet, nod and turn your head while the teammate stands still at
+   5 m. `SHAKY` should light up during movement. No MED/HIGH may fire and the zone must
+   not flip. Raise `SHAKE_GATE_FRAC` if normal riding posture keeps triggering SHAKY.
+7. **Tiers.** Jog at the camera from 10 m: HIGH (red, both motors, strobe, "Person behind!")
+   should fire around 2-3 s out. Walk past on the left line: MED left, not HIGH. Walk past
+   0.7 m to the left: HIGH left ("close pass").
+8. **Real traffic.** Run each recorded clip with `--video clip.mp4 --log clipN.csv`
+   (without `--demo-person`). Tally per clip: passes detected, correct side, false alerts,
+   missed HIGHs. These are your pitch numbers.
+9. **Venue.** Repeat steps 2 and 7 in the demo room. Lighting and background change jitter.
+
+Commit the final values with a message like "calibrated at venue".
+
+## Troubleshooting
+
+- **Pi: `numpy.dtype size changed` when importing picamera2**: the venv's NumPy is newer
+  than the one apt built picamera2 against. `pip install "numpy<2"` in the venv (older OS), or
+  use a USB camera.
+- **Pi: serial permission denied**: log out and back in after setup (dialout group).
+- **Pi: web view unreachable**: same Wi-Fi as the Pi? Hackathon networks often isolate clients;
+  use a phone hotspot for both. Set `STREAM_TOKEN` so strangers can't press your buttons.
+
+- **Low FPS**: `python -m tools.bench yolo` compares models and sizes. Try `yolo26n.pt`
+  (faster on CPU), `IMGSZ = 320`, or OpenVINO on Intel:
+  `yolo export model=yolov8n.pt format=openvino imgsz=416` then `--model yolov8n_openvino_model/`.
+- **No Arduino**: data-capable USB cable, CH340 driver on Windows/macOS, close the Arduino
+  IDE serial monitor (only one program can hold the port), or pass `--port`.
+- **Speech clips the first word** (Bluetooth power-saving): set `TTS_PREFIX = "Hey. "`.
+- **Don't use the bone-conduction headset's mic**: it switches Bluetooth into call mode and
+  wrecks audio. Use the laptop mic for **v**.
+- **Gemini 429 errors**: raise `GEMINI_MIN_INTERVAL_S` to 60 / (your RPM in AI Studio).
+- Main API here is `generate_content`; the newer Interactions API also exists but isn't needed.

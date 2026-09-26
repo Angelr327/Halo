@@ -1,0 +1,6 @@
+.env
+__pycache__/
+*.pt
+*.csv
+rec_*.mp4
+*_openvino_model/

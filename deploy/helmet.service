@@ -1,0 +1,19 @@
+# Auto-start the helmet at boot, as a USER service (so Bluetooth audio works):
+#   mkdir -p ~/.config/systemd/user && cp deploy/helmet.service ~/.config/systemd/user/
+#   loginctl enable-linger "$USER"                 # start at boot without logging in
+#   systemctl --user daemon-reload && systemctl --user enable --now helmet
+#   journalctl --user -u helmet -f                 # live logs / status lines
+[Unit]
+Description=Blind-spot helmet
+After=network-online.target sound.target
+Wants=network-online.target
+
+[Service]
+WorkingDirectory=%h/blindspot-helmet
+Environment=PYTHONUNBUFFERED=1
+ExecStart=%h/blindspot-helmet/.venv/bin/python -m helmet.main --headless
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=default.target
