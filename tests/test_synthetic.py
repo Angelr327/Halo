@@ -30,7 +30,22 @@ def box_for(X, Z, width_m=1.8, jitter=0.03, pos_jitter=4.0, shift=0.0):
     return Detection(x1, y1, x2, y2, 0.8, "car")
 
 
-def run(scenario, seconds, shake_px=0.0, seed=1):
+def person_box(X, Z, cam_h=1.6, height_m=1.75, width_m=0.5, jitter=0.04, pos_jitter=3.0):
+    """A walking person seen by a level camera cam_h above the floor. Close up, the feet
+    (and for a low camera, the head) leave the frame, so the box is clipped top/bottom."""
+    f = focal_px(W)
+    w = f * width_m / Z * (1 + random.uniform(-jitter, jitter))
+    cx = W / 2 + f * X / Z + random.uniform(-pos_jitter, pos_jitter)
+    y1 = H / 2 + f * (cam_h - height_m) / Z + random.uniform(-pos_jitter, pos_jitter)
+    y2 = H / 2 + f * cam_h / Z + random.uniform(-pos_jitter, pos_jitter)
+    x1, x2 = max(0.0, cx - w / 2), min(W - 1.0, cx + w / 2)
+    y1, y2 = max(0.0, y1), min(H - 1.0, y2)
+    if x2 - x1 < 3:
+        return None
+    return Detection(x1, y1, x2, y2, 0.8, "person")
+
+
+def run(scenario, seconds, shake_px=0.0, seed=1, boxer=None):
     random.seed(seed)
     trk, pol = Tracker(), AlertPolicy()
     fires, log = [], []
@@ -41,12 +56,15 @@ def run(scenario, seconds, shake_px=0.0, seed=1):
         shift = random.uniform(-shake_px, shake_px) if shake_px else 0.0
         gdx = shift - shift_prev             # what phase correlation would report
         shift_prev = shift
-        det = box_for(X, Z, shift=shift) if Z > 0.5 else None
+        if boxer:
+            det = boxer(X, Z) if Z > 0.5 else None
+        else:
+            det = box_for(X, Z, shift=shift) if Z > 0.5 else None
         trk.update([det] if det else [], t, gdx, 0.0)
         shaky = abs(gdx) / W > cfg.SHAKE_GATE_FRAC
         for tr in trk.tracks:
             if tr.matched_now:
-                update_metrics(tr, t, W, W / 2, shaky)
+                update_metrics(tr, t, W, W / 2, shaky, frame_h=H)
         fires += pol.evaluate(trk.tracks, t, shaky)
         for tr in trk.tracks:
             if tr.matched_now:
@@ -110,6 +128,74 @@ def test_shake_does_not_hide_real_threat():
     fires, _, _ = run(approach_behind, 3.8, shake_px=30)
     assert [f for f in fires if f.tier == 3], "real approach missed under head shake"
     print("  approach under head shake: HIGH still fires")
+
+
+def walk(X0, Z0=7.0, speed=1.4, X1=None, stop_z=0.0):
+    """Person walking toward the camera at 1.4 m/s, lateral X0 -> X1 (m) by the time they arrive."""
+    X1 = X0 if X1 is None else X1
+
+    def scen(t):
+        Z = max(stop_z, Z0 - speed * t)
+        X = X0 + (X1 - X0) * (1 - Z / Z0)
+        return X, Z, (Z / speed if Z > stop_z else math.inf)
+    return scen
+
+
+def test_person_straight_at_head_height_camera_is_high():
+    # Below ~3.4 m the feet leave the frame. Area-based TTC then stalled around 2.5 s.
+    for seed in (1, 2, 3):
+        fires, log, _ = run(walk(0.0), 4.8, seed=seed, boxer=person_box)
+        high = [f for f in fires if f.tier == 3]
+        assert high, f"seed {seed}: person walking straight at the rider never went HIGH"
+        truth = (7.0 - 1.4 * high[0].t) / 1.4
+        errs = [abs(tr.ttc - tt) / tt for _, tt, tr in log if tr.ready and 0.8 < tt < 2.5 and math.isfinite(tr.ttc)]
+        med_err = sorted(errs)[len(errs) // 2]
+        assert truth >= 1.2 and med_err < 0.30, f"seed {seed}: HIGH at true TTC {truth:.2f}s, err {med_err:.0%}"
+    print(f"  person straight on, head-height camera: HIGH at true TTC {truth:.2f}s, close-range TTC err {med_err:.0%}")
+
+
+def test_person_on_side_line_is_medium_not_high():
+    # README calibration step 7: walking past on the 1.5 m line = MED on that side, not HIGH.
+    for seed in (1, 2, 3):
+        fires, _, _ = run(walk(-1.5), 4.8, seed=seed, boxer=person_box)
+        assert not [f for f in fires if f.tier == 3], f"seed {seed}: HIGH for a normal 1.5 m pass: {fires}"
+        assert {f.side for f in fires if f.tier == 2} <= {"L"}
+    print("  person passing on the 1.5 m line: no HIGH")
+
+
+def test_person_brushing_past_is_high():
+    # Just outside the 1.2 m lane, body ~0.35 m from the bike: close pass on the left.
+    for seed in (1, 2, 3):
+        fires, _, _ = run(walk(-0.95), 4.8, seed=seed, boxer=person_box)
+        high = [f for f in fires if f.tier == 3]
+        assert high and high[0].side == "L", f"seed {seed}: {fires}"
+    print(f"  person brushing past 0.95 m left: HIGH {high[0].side} ({high[0].reason})")
+
+
+def test_standing_still_at_frame_edge_is_quiet():
+    # Walks in 1.3 m left, stops half out of frame. Aging the last TTC used to run it to 0 -> HIGH.
+    fires, _, _ = run(walk(-1.3, Z0=6.0, stop_z=2.0), 9.0, boxer=lambda X, Z: person_box(X, Z, cam_h=0.9))
+    late = [f for f in fires if f.t > 4.5]
+    print(f"  standing still at the frame edge: tiers after stopping {sorted({f.tier for f in late})} (MED 'alongside' is intended)")
+    assert not [f for f in late if f.tier == 3], late
+
+
+def test_car_cutting_into_lane_is_high_early():
+    # Starts 3 m left, steers into the rider's lane while closing at 10 m/s.
+    scen = lambda t: (-3.0 * max(0.0, 1 - t / 3.0), 30 - 10 * t, (30 - 10 * t) / 10)
+    fires, _, _ = run(scen, 2.9)
+    high = [f for f in fires if f.tier == 3]
+    assert high, "no HIGH for a car cutting into the rider's lane"
+    truth = 3.0 - high[0].t
+    print(f"  car cutting in from 3 m left: first HIGH at true TTC {truth:.2f}s ({high[0].reason})")
+    assert truth >= 2.0 and "cutting in" in high[0].reason
+
+
+def test_person_veering_away_is_not_high():
+    for seed in (1, 2, 3):
+        fires, _, _ = run(walk(-0.8, X1=-2.6), 4.8, seed=seed, boxer=person_box)
+        assert not [f for f in fires if f.tier == 3], f"seed {seed}: HIGH for someone veering away: {fires}"
+    print("  person veering away from the lane: no HIGH")
 
 
 if __name__ == "__main__":

@@ -9,6 +9,7 @@ import numpy as np
 
 from . import config as cfg
 from .outputs import LIGHT_NAMES
+from .perception import corridor_half_m, focal_px
 from .risk import fmt_ttc
 
 TIER_COLOR = {0: (170, 170, 170), 1: (0, 215, 215), 2: (0, 140, 255), 3: (0, 0, 255)}
@@ -34,6 +35,24 @@ def _sparkline(img, values, x, y, w, h, color):
     cv2.polylines(img, [np.array(pts, np.int32)], False, color, 1, cv2.LINE_AA)
 
 
+def _corridor_band(img, vp):
+    """Your lane on the road: bike + margin, in perspective (guide only; needs CAMERA_HEIGHT_M).
+    The exact per-object test is the short bar drawn under each box."""
+    h, w = img.shape[:2]
+    y_h = h * cfg.HORIZON_FRAC
+    y_far = y_h + focal_px(w) * cfg.CAMERA_HEIGHT_M / 40.0      # stop drawing 40 m out
+    if y_far >= h - 1:
+        return
+    half = corridor_half_m()
+    # a ground point at row y is at range Z = f*H/(y - y_h); its half-width in px is f*half/Z
+    hw = [half * (y - y_h) / cfg.CAMERA_HEIGHT_M for y in (y_far, h - 1)]
+    poly = np.array([(vp - hw[0], y_far), (vp + hw[0], y_far), (vp + hw[1], h - 1), (vp - hw[1], h - 1)], np.int32)
+    layer = img.copy()
+    cv2.fillPoly(layer, [poly], (255, 255, 0))
+    cv2.addWeighted(layer, 0.15, img, 0.85, 0, img)
+    cv2.polylines(img, [poly], True, (255, 255, 0), 1, cv2.LINE_AA)
+
+
 class Overlay:
     def __init__(self):
         self.show_panel = True
@@ -47,6 +66,8 @@ class Overlay:
 
         # ---- guides
         vp = int(c["vp_x"])
+        if cfg.ZONE_METHOD == "lateral":
+            _corridor_band(img, vp)
         for yy in range(0, h, 14):
             cv2.line(img, (vp, yy), (vp, yy + 7), (255, 255, 0), 1)
         if cfg.ZONE_METHOD == "thirds":
@@ -56,9 +77,19 @@ class Overlay:
         # ---- tracks
         for tr in c["tracks"]:
             d = tr.det
-            col = TIER_COLOR[tr.tier] if tr.matched_now else (90, 90, 90)
-            thick = 3 if tr.tier >= 2 else 1
+            col = TIER_COLOR[tr.shown_tier] if tr.matched_now else (90, 90, 90)
+            thick = 3 if tr.shown_tier >= 2 else 1
             cv2.rectangle(img, (int(d.x1), int(d.y1)), (int(d.x2), int(d.y2)), col, thick)
+            if tr.matched_now and not tr.alongside and cfg.ZONE_METHOD == "lateral":
+                # your lane at THIS object's distance: box overlaps the bar <=> zone CENTER
+                px_per_m = d.w / cfg.CLASS_WIDTH_M.get(tr.label, 1.8)
+                yb = int(d.y1) + 4                   # top edge: the ID tag sits at the bottom
+                hw = int(corridor_half_m() * px_per_m)
+                cv2.line(img, (vp - hw, yb), (vp + hw, yb), (255, 255, 0), 2)
+                if tr.pred_lat_m is not None:        # where it will be sideways at contact
+                    px = int(vp + tr.pred_lat_m * px_per_m)
+                    if abs(px - d.cx) > 4:
+                        cv2.arrowedLine(img, (int(d.cx), yb + 10), (px, yb + 10), col, 2, tipLength=0.25)
             tag = f"#{tr.id} {tr.label} {tr.zone[0] if tr.zone else '?'}"
             ty = min(h - 4, int(d.y2) + 14)
             _text(img, tag, (int(d.x1) + 2, ty), 0.42, (0, 0, 0), 1, bg=col)
@@ -136,19 +167,21 @@ class Overlay:
         cv2.line(p, (0, y), (p.shape[1], y), (80, 80, 80), 1)
         y += 16
 
-        tracks = sorted(c["tracks"], key=lambda tr: (-tr.tier, tr.ttc if math.isfinite(tr.ttc) else 1e9))
+        tracks = sorted(c["tracks"], key=lambda tr: (-tr.shown_tier, tr.ttc if math.isfinite(tr.ttc) else 1e9))
         for tr in tracks[:5]:
             if y > p.shape[0] - 70:
                 break
-            col = TIER_COLOR[tr.tier]
+            col = TIER_COLOR[tr.shown_tier]
             stale = "" if tr.matched_now else "  (coasting)"
-            line(f"#{tr.id} {tr.label} {tr.zone or '?'}  {TIER_NAME[tr.tier]}{stale}", col, 0.48)
+            raw = f" (raw {TIER_NAME[tr.tier]})" if tr.tier != tr.shown_tier else ""
+            line(f"#{tr.id} {tr.label} {tr.zone or '?'}  {TIER_NAME[tr.shown_tier]}{raw}{stale}", col, 0.48)
             line(f"  area {tr.det.area/1000:.1f}k  grow {tr.growth:.2f}x ({tr.growth_pct_s:+.0f}%/s)"
-                 f"  cons {tr.consistency:.2f}")
+                 f"  cons {tr.consistency:.2f} [{tr.scale_axis}]")
             clr = "-" if tr.clearance_m is None else f"{tr.clearance_m:.1f}m"
             lat = "-" if tr.lat_m is None else f"{tr.lat_m:+.1f}m"
             dist = "-" if tr.dist_m is None else f"{tr.dist_m:.0f}m"
-            line(f"  TTC {fmt_ttc(tr.ttc)}  dist {dist}  lat {lat}  clr {clr}"
+            pred = "" if tr.pred_lat_m is None else f" ->{round(tr.pred_lat_m, 1) + 0.0:+.1f}" + (" PATH" if tr.on_path else "")
+            line(f"  TTC {fmt_ttc(tr.ttc)}  dist {dist}  lat {lat}{pred}  clr {clr}"
                  + ("  EDGE" if tr.alongside else ""))
             _sparkline(p, [s.area for s in tr.hist], 12, y - 8, 150, 18, col)
             _text(p, tr.reason[:30], (170, y + 6), 0.38, (170, 170, 170))

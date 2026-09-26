@@ -54,15 +54,20 @@ class AlertPolicy:
 
     def raw_tier(self, tr):
         high, med = self.thresholds(tr.label)
-        close = tr.clearance_m is not None and tr.clearance_m < cfg.CLOSE_PASS_M
-        if tr.approaching and tr.ttc <= high and (tr.zone == CENTER or close):
-            return 3, f"TTC {tr.ttc:.1f}s " + ("behind" if tr.zone == CENTER else "close pass")
+        close_m = cfg.CLASS_CLOSE_PASS_M.get(tr.label, cfg.CLOSE_PASS_M)
+        clr = [c for c in (tr.clearance_m, tr.pred_clearance_m) if c is not None]
+        clr = min(clr) if clr else None                   # closest now OR at contact
+        close = clr is not None and clr < close_m
+        in_lane = tr.zone == CENTER or tr.on_path         # in your lane now, or heading into it
+        if tr.approaching and tr.ttc <= high and (in_lane or close):
+            what = "behind" if tr.zone == CENTER else "cutting in" if tr.on_path else "close pass"
+            return 3, f"TTC {tr.ttc:.1f}s {what}"
         if tr.zone in (LEFT, RIGHT):
             in_spot = (tr.alongside and tr.was_approaching) or (tr.approaching and tr.ttc <= med)
-            near = tr.clearance_m is not None and tr.clearance_m < 1.5 * cfg.CLOSE_PASS_M
+            near = clr is not None and clr < 1.5 * close_m
             if in_spot and (not self.profile["med_needs_close"] or near):
                 return 2, "alongside" if tr.alongside else f"blind spot, TTC {tr.ttc:.1f}s"
-        if tr.zone == CENTER and tr.approaching and tr.ttc <= med:
+        if in_lane and tr.approaching and tr.ttc <= med:
             return 2, f"closing behind, TTC {tr.ttc:.1f}s"
         if tr.approaching:
             return 1, f"approaching, TTC {tr.ttc:.1f}s"
@@ -80,7 +85,7 @@ class AlertPolicy:
         for tr in tracks:
             if not tr.matched_now:
                 if tr.coasting(t):
-                    tr.tier, tr.cand_tier, tr.cand_count = 0, 0, 0
+                    tr.tier, tr.shown_tier, tr.cand_tier, tr.cand_count = 0, 0, 0, 0
                 continue
             tier, reason = self.raw_tier(tr)
             if tier == tr.cand_tier:
@@ -88,6 +93,12 @@ class AlertPolicy:
             else:
                 tr.cand_tier, tr.cand_count = tier, 1
             tr.tier, tr.reason = tier, reason
+            # Overlay colour: escalate only once confirmed (so one noisy frame doesn't flash
+            # red when nothing fires), drop immediately.
+            if tier == 0 or tr.cand_count >= cfg.CONFIRM_FRAMES[tier]:
+                tr.shown_tier = tier
+            else:
+                tr.shown_tier = min(tr.shown_tier, tier)
             if tier == 0 or tr.cand_count < cfg.CONFIRM_FRAMES[tier]:
                 continue
             if tier == 1 and not self.profile["low_haptic"]:
