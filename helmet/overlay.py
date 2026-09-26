@@ -188,7 +188,7 @@ class Overlay:
             stale = "" if tr.matched_now else "  (coasting)"
             raw = f" (raw {TIER_NAME[tr.tier]})" if tr.tier != tr.shown_tier else ""
             line(f"#{tr.id} {tr.label} {tr.zone or '?'}  {TIER_NAME[tr.shown_tier]}{raw}{stale}", col, 0.48)
-            line(f"  area {tr.det.area/1000:.1f}k  grow {tr.growth:.2f}x ({tr.growth_pct_s:+.0f}%/s)"
+            line(f"  box {tr.det.w:.0f}x{tr.det.h:.0f}px  grow {tr.growth:.2f}x ({tr.growth_pct_s:+.0f}%/s)"
                  f"  cons {tr.consistency:.2f} [{tr.scale_axis}]")
             clr = "-" if tr.clearance_m is None else f"{tr.clearance_m:.1f}m"
             lat = "-" if tr.lat_m is None else f"{tr.lat_m:+.1f}m"

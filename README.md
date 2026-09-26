@@ -197,7 +197,7 @@ give a long buzz.
 ## Calibration procedure
 
 Tune by watching numbers, not by guessing. Every metric is in the side panel:
-`grow` (late/early size ratio), `cons` (fraction of frames that grew), `TTC`, `dist`,
+`box` (width x height in pixels, for `FOCAL_PX`), `grow` (late/early size ratio), `cons` (fraction of frames that grew), `TTC`, `dist`,
 `lat` (lateral offset, − = your left), `->` (predicted `lat` when it reaches you, `PATH` = heading
 into your lane), `clr` (passing clearance), `[area|h|w]` (which box size TTC used), zone, tier and
 the reason. A tier in brackets `(raw HIGH)` is what this frame says; the box only turns that colour
@@ -229,7 +229,7 @@ level and pointing straight back.
 4. **Lateral.** Stand on the 1.5 m side line at 3, 6 and 9 m. `lat` should read
    about ±1.5 m at every distance (it is distance-independent). If it's biased, the camera
    is yawed; if it's scaled, fix `CLASS_WIDTH_M` for that class.
-5. **Distance (optional).** At a measured distance D, read the box width w px:
+5. **Distance (optional).** At a measured distance D, read the box width w px (first number after `box`):
    `FOCAL_PX = w * D / real_width_m`. Best done with a real car (1.8 m) in a parking lot.
 6. **Shake.** Wear the helmet, nod and turn your head while the teammate stands still at
    5 m. `SHAKY` should light up during movement. No MED/HIGH may fire and the zone must
