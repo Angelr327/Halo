@@ -320,7 +320,17 @@ def check_cmd(args):
         print("   FAIL no Arduino: check the USB cable (data, not charge-only) and that nothing else has the port open")
     elif not got_any:
         ok = False
-        print("   FAIL Arduino connected but sent no ultrasonic data: re-flash the updated sketch")
+        seen = list(link.rx_log)
+        print("   FAIL Arduino connected but sent no ultrasonic data. It sent: "
+              + (" | ".join(seen)[:120] if seen else "nothing"))
+        if any("distance" in x or "HC-SR04" in x for x in seen):
+            print("        -> that's the HC-SR04 test sketch: upload firmware/helmet_arduino/helmet_arduino.ino")
+        elif any(x.startswith(("READY", "LINK", "FAILSAFE", "STATUS")) for x in seen):
+            print("        -> helmet firmware without ultrasonic support: upload the latest helmet_arduino.ino")
+        elif seen:
+            print("        -> unreadable text = a different sketch or baud rate: upload helmet_arduino.ino (57600 baud)")
+        else:
+            print("        -> silent: upload helmet_arduino.ino, and close the Arduino IDE's Serial Monitor")
     else:
         for k, vals in readings.items():
             hits = [v for v in vals if v is not None]
