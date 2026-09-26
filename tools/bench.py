@@ -9,6 +9,9 @@
 import argparse
 import glob
 import os
+import re
+import shutil
+import subprocess
 import threading
 import time
 
@@ -147,6 +150,31 @@ def list_csi_cameras():
     return cams, ""
 
 
+def rpicam_check():
+    """Fallback when Python can't import picamera2: test each Camera Module with rpicam-still.
+    Returns [(label, ok, detail)]."""
+    tool = shutil.which("rpicam-still") or shutil.which("libcamera-still")
+    if not tool:
+        return []
+    try:
+        out = subprocess.run([tool, "--list-cameras"], capture_output=True, text=True, timeout=15)
+    except Exception as e:
+        return [("rpicam", False, f"{type(e).__name__}: {e}")]
+    cams = re.findall(r"^\s*(\d+)\s*:\s*(\S+)", out.stdout + out.stderr, re.M)
+    results = []
+    for num, model in cams:
+        fn = f"check_csi{num}.jpg"
+        try:
+            r = subprocess.run([tool, "-n", "--camera", num, "-t", "1000", "--width", "640", "--height", "480",
+                                "-o", fn], capture_output=True, text=True, timeout=20)
+            ok = r.returncode == 0 and os.path.exists(fn) and os.path.getsize(fn) > 0
+            detail = f"snapshot -> {fn}" if ok else (r.stderr.strip().splitlines() or ["no output"])[-1][:80]
+        except Exception as e:
+            ok, detail = False, f"{type(e).__name__}: {e}"
+        results.append((f"CSI{num} {model}", ok, detail))
+    return results
+
+
 class _Grabber:
     """Reads one camera on its own thread so both cameras run at the same time."""
 
@@ -214,11 +242,20 @@ def check_cmd(args):
     print("== cameras")
     grabbers = []
     csi, why = list_csi_cameras()
+    rpicam = []
     if csi is None:
-        print(f"   Camera Modules: skipped, {why}")
+        print(f"   Camera Modules: {why}")
+        print("   testing them with rpicam-still instead (one at a time, no live FPS)...")
+        rpicam = rpicam_check()
+        for label, good, detail in rpicam:
+            print(f"   {'PASS' if good else 'FAIL'} {label}: {detail}")
+        if rpicam:
+            print("   NOTE: the helmet app itself needs picamera2 in Python for these cameras:\n"
+                  "         python3 -m venv --system-site-packages .venv && . .venv/bin/activate "
+                  "&& pip install -r requirements.txt")
         csi = []
     usb = list_usb_cameras() if os.path.isdir("/sys/class/video4linux") else [(i, "camera") for i in range(2)]
-    print(f"   found: {len(csi)} Camera Module(s) {[m for _, m in csi]}, {len(usb)} USB camera(s) {[n for _, n in usb]}")
+    print(f"   live capture: {len(csi)} Camera Module(s) {[m for _, m in csi]}, {len(usb)} USB camera(s) {[n for _, n in usb]}")
     for opener, cams in ((_open_csi, csi), (_open_usb, usb)):
         for a, b in cams:
             try:
@@ -273,9 +310,11 @@ def check_cmd(args):
     if grabbers:
         cv2.imwrite("check_cameras.jpg", np.hstack([_tile(g) for g in grabbers]))
         print("   side-by-side: check_cameras.jpg")
-    if len(grabbers) < args.expect_cameras:
+    ok &= all(good for _, good, _ in rpicam)
+    n_cams = len(grabbers) + sum(1 for _, good, _ in rpicam if good)
+    if n_cams < args.expect_cameras:
         ok = False
-        print(f"   FAIL expected {args.expect_cameras} cameras, opened {len(grabbers)}")
+        print(f"   FAIL expected {args.expect_cameras} cameras, {n_cams} working")
     if link.ser is None:
         ok = False
         print("   FAIL no Arduino: check the USB cable (data, not charge-only) and that nothing else has the port open")
