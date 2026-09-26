@@ -1,20 +1,29 @@
 /*
-  Blind-spot helmet firmware — Arduino Nano / Nano Every
+  Blind-spot helmet firmware — Arduino Uno / Nano / Nano Every (same pin numbers)
   Library: Adafruit NeoPixel (Library Manager -> "Adafruit NeoPixel")
 
-  Wiring (vibration modules have 3 pins: IN/SIG, VCC, GND)
-    Left motor module   IN -> D5    VCC -> 5V   GND -> GND
-    Right motor module  IN -> D6    VCC -> 5V   GND -> GND
-    NeoPixel stick      DIN -> D2 (through 330 ohm if you have one)  5V -> 5V  GND -> GND
-    Optional button     D3 -> button -> GND   (press = "what's behind me?")
+  Wiring (see README "Wiring (Arduino Uno + Pi)"). Put 5V and GND on the breadboard rails.
+    Left vibration motor   D5 -> 1k -> NPN base (or module IN)   motor between 5V and collector, diode across it
+    Right vibration motor  D6 -> same
+    Left buzzer            D9  (3-pin module: I/O pin; bare buzzer: through an NPN like the motors)
+    Right buzzer           D10
+    Ultrasonic SL (side-left, angled back)   TRIG D7   ECHO D8
+    Ultrasonic SR (side-right, angled back)  TRIG D11  ECHO D12
+    Ultrasonic BL (back, left of centre)     TRIG A0   ECHO A1
+    Ultrasonic BR (back, right of centre)    TRIG A2   ECHO A3
+    NeoPixel stick (optional rear light)     DIN D2 (through 330 ohm if you have one)
+    Optional button                          D3 -> button -> GND   (press = "what's behind me?")
+  The Pi connects with the Uno's USB cable only (power + serial). No other wires between them.
 
   Serial 57600 baud, one command per line:
     L<n> R<n> B<n>  haptic on left / right / both: 0 stop, 1 gentle, 2 medium, 3 strong, 4 fault
     M<n>            rear light: 0 normal flash, 1 alert, 2 danger. Host sends this every 250 ms (heartbeat)
     F1 / F0         host reports a fault (camera) / clears it
+    Z1 / Z0         buzzers on / muted (they follow STRONG and FAULT haptic patterns on the same side)
     X               everything off (bench testing)
     ?               status
-  Board -> host: READY, BTN, FAILSAFE, LINK OK, ERR <line>
+  Board -> host: READY, BTN, FAILSAFE, LINK OK, ERR <line>,
+                 U <SL> <SR> <BL> <BR>   ultrasonic distances in cm, -1 = no echo (~8 times/s)
 
   Failsafe: no command for 1.5 s -> light returns to a normal flashing bike light
   (fail-visible) and both motors give one long "system down" pattern.
@@ -27,6 +36,18 @@ const uint8_t PIN_MOTOR_R = 6;
 const uint8_t PIN_PIXELS  = 2;
 const uint8_t PIN_BUTTON  = 3;
 const uint8_t PIN_STATUS  = LED_BUILTIN;   // mirrors the rear light: test without the strip
+const uint8_t PIN_BUZZ_L  = 9;
+const uint8_t PIN_BUZZ_R  = 10;
+const bool    BUZZER_PASSIVE = false;       // true for bare passive buzzers (need a tone; Uno plays one at a time)
+const uint16_t BUZZ_HZ    = 2300;
+const uint8_t BUZZ_MIN_LEVEL = 3;           // buzzers join STRONG (3) and FAULT (4) patterns only
+
+// Ultrasonic sensors (HC-SR04), pinged one at a time so they don't hear each other's echoes
+const uint8_t NUM_SONAR = 4;
+const uint8_t SONAR_TRIG[NUM_SONAR] = {7, 11, A0, A2};   // SL, SR, BL, BR
+const uint8_t SONAR_ECHO[NUM_SONAR] = {8, 12, A1, A3};
+const unsigned long SONAR_TIMEOUT_US = 18000;   // ~3 m round trip; further = no echo
+const unsigned long SONAR_GAP_MS     = 30;      // one ping every 30 ms -> each sensor ~8 Hz
 const uint8_t NUM_PIXELS  = 8;
 const bool    MOTOR_ACTIVE_HIGH = true;    // set false if your module turns ON with a LOW input
 const unsigned long LINK_TIMEOUT_MS = 1500;
@@ -51,12 +72,13 @@ const Step PAT_HELLO_R[] = {{0, 400}, {190, 180}, {0, 0}};   // leading pause: l
 
 struct Motor {
   uint8_t pin;
+  uint8_t buzz;          // buzzer on the same side
   const Step* pat;
   uint8_t idx;
   uint8_t level;
   unsigned long stepStart;
 };
-Motor motors[2] = {{PIN_MOTOR_L, nullptr, 0, 0, 0}, {PIN_MOTOR_R, nullptr, 0, 0, 0}};
+Motor motors[2] = {{PIN_MOTOR_L, PIN_BUZZ_L, nullptr, 0, 0, 0}, {PIN_MOTOR_R, PIN_BUZZ_R, nullptr, 0, 0, 0}};
 
 // ------------------------------------------------------------------ state
 uint8_t lightMode = 0;
@@ -71,10 +93,28 @@ char lineBuf[16];
 uint8_t lineLen = 0;
 bool lastButton = HIGH;
 unsigned long buttonChangeMs = 0;
+bool buzzEnabled = true;
+int sonarCm[NUM_SONAR] = {-1, -1, -1, -1};
+uint8_t sonarIdx = 0;
+unsigned long lastPingMs = 0;
 
 // ------------------------------------------------------------------ motors
 void motorWrite(uint8_t pin, uint8_t duty) {
   analogWrite(pin, MOTOR_ACTIVE_HIGH ? duty : 255 - duty);
+}
+
+void buzzWrite(uint8_t pin, bool on) {
+  if (BUZZER_PASSIVE) {
+    if (on) tone(pin, BUZZ_HZ); else noTone(pin);
+  } else {
+    digitalWrite(pin, on ? HIGH : LOW);
+  }
+}
+
+// Motor and its same-side buzzer move together; the buzzer only for strong/fault patterns.
+void outWrite(Motor& m, uint8_t duty) {
+  motorWrite(m.pin, duty);
+  buzzWrite(m.buzz, buzzEnabled && duty > 0 && m.level >= BUZZ_MIN_LEVEL);
 }
 
 const Step* patternFor(uint8_t level) {
@@ -94,7 +134,7 @@ void startPattern(Motor& m, const Step* p, uint8_t level) {
   m.idx = 0;
   m.level = level;
   m.stepStart = millis();
-  motorWrite(m.pin, p ? p[0].duty : 0);
+  outWrite(m, p ? p[0].duty : 0);
 }
 
 void updateMotor(Motor& m, unsigned long now) {
@@ -104,11 +144,11 @@ void updateMotor(Motor& m, unsigned long now) {
   if (m.pat[m.idx].ms == 0) {                 // end of pattern
     m.pat = nullptr;
     m.level = 0;
-    motorWrite(m.pin, 0);
+    outWrite(m, 0);
     return;
   }
   m.stepStart = now;
-  motorWrite(m.pin, m.pat[m.idx].duty);
+  outWrite(m, m.pat[m.idx].duty);
 }
 
 bool playOn(uint8_t which, int level) {
@@ -116,7 +156,7 @@ bool playOn(uint8_t which, int level) {
   if (level == 0) {
     motors[which].pat = nullptr;
     motors[which].level = 0;
-    motorWrite(motors[which].pin, 0);
+    outWrite(motors[which], 0);
     return true;
   }
   startPattern(motors[which], patternFor(level), level);
@@ -150,11 +190,13 @@ void handleLine(const char* s, unsigned long now) {
       if (arg == 1 && !hostFault) { playOn(0, 4); playOn(1, 4); }
       if (arg == 0 || arg == 1) hostFault = (arg == 1); else ok = false;
       break;
+    case 'Z': if (arg == 0 || arg == 1) buzzEnabled = (arg == 1); else ok = false; break;
     case 'X': playOn(0, 0); playOn(1, 0); lightMode = 0; break;
     case '?':
       Serial.print(F("STATUS mode=")); Serial.print(lightMode);
       Serial.print(F(" failsafe=")); Serial.print(failsafe);
-      Serial.print(F(" hostFault=")); Serial.println(hostFault);
+      Serial.print(F(" hostFault=")); Serial.print(hostFault);
+      Serial.print(F(" buzz=")); Serial.println(buzzEnabled);
       break;
     default: ok = false;
   }
@@ -193,14 +235,44 @@ void pollButton(unsigned long now) {
   }
 }
 
+// ------------------------------------------------------------------ ultrasonic
+// One sensor per call, round-robin. pulseIn blocks for at most SONAR_TIMEOUT_US (18 ms),
+// short enough that haptic timing and the serial heartbeat are unaffected.
+void pollSonar(unsigned long now) {
+  if (now - lastPingMs < SONAR_GAP_MS) return;
+  lastPingMs = now;
+  uint8_t i = sonarIdx;
+  digitalWrite(SONAR_TRIG[i], LOW);
+  delayMicroseconds(2);
+  digitalWrite(SONAR_TRIG[i], HIGH);
+  delayMicroseconds(10);
+  digitalWrite(SONAR_TRIG[i], LOW);
+  unsigned long us = pulseIn(SONAR_ECHO[i], HIGH, SONAR_TIMEOUT_US);
+  sonarCm[i] = us ? (int)(us / 58) : -1;        // 58 us per cm (sound there and back)
+  sonarIdx = (sonarIdx + 1) % NUM_SONAR;
+  if (sonarIdx == 0) {                            // full round: report all four
+    Serial.print(F("U"));
+    for (uint8_t k = 0; k < NUM_SONAR; k++) { Serial.print(' '); Serial.print(sonarCm[k]); }
+    Serial.println();
+  }
+}
+
 // ------------------------------------------------------------------ main
 void setup() {
   pinMode(PIN_MOTOR_L, OUTPUT);
   pinMode(PIN_MOTOR_R, OUTPUT);
   pinMode(PIN_STATUS, OUTPUT);
   pinMode(PIN_BUTTON, INPUT_PULLUP);
+  pinMode(PIN_BUZZ_L, OUTPUT);
+  pinMode(PIN_BUZZ_R, OUTPUT);
+  for (uint8_t k = 0; k < NUM_SONAR; k++) {
+    pinMode(SONAR_TRIG[k], OUTPUT);
+    pinMode(SONAR_ECHO[k], INPUT);
+  }
   motorWrite(PIN_MOTOR_L, 0);
   motorWrite(PIN_MOTOR_R, 0);
+  buzzWrite(PIN_BUZZ_L, false);
+  buzzWrite(PIN_BUZZ_R, false);
   strip.begin();
   strip.setBrightness(255);     // brightness is set per mode via RED[]
   strip.show();
@@ -215,6 +287,7 @@ void loop() {
   unsigned long now = millis();
   pollSerial(now);
   pollButton(now);
+  pollSonar(now);
 
   if (everConnected && !failsafe && now - lastCmdMs > LINK_TIMEOUT_MS) {
     failsafe = true;                          // laptop/app died: be a normal bike light

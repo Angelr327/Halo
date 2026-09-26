@@ -91,21 +91,46 @@ python -m helmet.main --model yolo26n.pt       # swap detector
 
 The handlebar button (D3 to GND) does the same as **g**. Headless, the same commands are buttons in the web view.
 
-## Wiring (no soldering)
+## Wiring (Arduino Uno + Pi, no soldering)
 
-| Part | Pin on part | Nano pin |
+**Pi ↔ Uno: only the Uno's USB cable** (USB-A on the Pi, USB-B on the Uno). It carries power,
+serial and a shared ground. The OLED is the only thing wired to the Pi's pins (see the HUD section).
+
+Run the Uno's **5V** pin to the breadboard's **+** rail and a **GND** pin to the **−** rail; every
+part below takes power from those rails.
+
+| Part | Part pin | Uno pin |
 |---|---|---|
-| Left vibration module | IN / SIG | D5 |
-| Right vibration module | IN / SIG | D6 |
-| NeoPixel stick (8 LED) | DIN | D2 (330 Ω in series if you have one) |
+| Ultrasonic SL (side-left, angled ~45° back) | TRIG / ECHO | D7 / D8 |
+| Ultrasonic SR (side-right, angled ~45° back) | TRIG / ECHO | D11 / D12 |
+| Ultrasonic BL (back, left of centre) | TRIG / ECHO | A0 / A1 |
+| Ultrasonic BR (back, right of centre) | TRIG / ECHO | A2 / A3 |
+| Left vibration motor | via NPN (below), or module IN | D5 |
+| Right vibration motor | via NPN, or module IN | D6 |
+| Left buzzer | I/O (3-pin module), or via NPN | D9 |
+| Right buzzer | I/O, or via NPN | D10 |
 | Optional button | one leg | D3 (other leg → GND) |
-| All modules | VCC / 5V | 5V |
-| All modules | GND | GND |
+| Optional NeoPixel rear light | DIN | D2 (330 Ω in series if you have one) |
+| All ultrasonics, modules | VCC / GND | + rail / − rail |
 
-Three devices share 5V and GND: use a Nano I/O expansion shield (every pin has its own
-S-V-G header) or a mini breadboard. Everything runs from the laptop's USB (< 400 mA).
-Bare coin motors (no module) need an NPN transistor or logic-level MOSFET plus a flyback
-diode each. Never drive a motor straight from a pin.
+The Uno is 5V, so the HC-SR04 ECHO pins connect directly (no voltage dividers, unlike the Pi).
+
+**Bare vibration disc (2 wires): one NPN transistor each** (2N2222 / PN2222 / S8050).
+Never drive a motor straight from a pin; it draws more than a pin can give.
+```
+Uno D5 ──[1 kΩ]── B (base)
+                  C (collector) ── motor red wire ... motor other wire ── + rail (5V)
+                  E (emitter)   ── − rail (GND)
+diode (1N4148/1N4001) across the motor: striped end (cathode) to the 5V side
+```
+A bare 2-pin buzzer is wired the same way (buzzer + to 5V, − to the collector, no diode).
+Buzzer and vibration modules with 3 pins (VCC, GND, IN/I/O) have the transistor built in:
+IN goes straight to the Uno pin.
+
+Check it before mounting: flash the sketch, then `python -m tools.bench serial` on the Pi.
+You should feel left then right at power-up; `l` / `r` buzz each side (strong also beeps);
+`u` prints the four distances (wave a hand in front of each sensor); `z0` mutes the buzzers.
+Total draw is roughly 250 mA from the Pi's USB (see the power note above).
 
 ## Transparent OLED HUD (Pi)
 

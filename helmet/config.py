@@ -143,6 +143,8 @@ VOICE_QUERY_SECONDS = 3.0
 SERIAL_PORT = None                # None = auto-detect, or "COM5" / "/dev/cu.usbserial-1410"
 SERIAL_BAUD = 57600               # must match the sketch
 HEARTBEAT_S = 0.25
+BUZZERS_ENABLED = True            # buzzers beep with STRONG/FAULT buzzes; False for a quiet demo room
+SONAR_MAX_CM = 300                # ultrasonic readings beyond this are treated as "nothing there"
 
 # ---------------------------------------------------------------- transparent OLED HUD
 HUD_ENABLED = True                # [restart] big directional arrows for MED/HIGH threats

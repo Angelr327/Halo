@@ -4,6 +4,8 @@ Serial protocol (newline-terminated ASCII, see firmware):
   L<n>/R<n>/B<n>  haptic pattern n (1 gentle, 2 medium, 3 strong, 4 fault, 0 stop)
   M<n>            light mode (0 normal, 1 alert, 2 danger) - also the heartbeat
   F1 / F0         host-detected fault on / off
+  Z1 / Z0         buzzers on / muted
+Board -> host: READY, BTN, FAILSAFE, LINK OK, U <SL> <SR> <BL> <BR> (ultrasonic cm, -1 = none)
 The heartbeat is sent from the vision loop, so if that loop freezes the Arduino's
 watchdog trips and the light falls back to a normal flashing bike light.
 """
@@ -19,6 +21,7 @@ from collections import deque
 from . import config as cfg
 
 LIGHT_NAMES = {0: "NORMAL", 1: "ALERT", 2: "DANGER"}
+SONAR_NAMES = ("SL", "SR", "BL", "BR")   # side-left, side-right, back-left, back-right
 PORT_HINTS = ("arduino", "ch340", "ch34", "wch", "usb serial", "usb-serial", "usbserial",
               "usbmodem", "ttyusb", "ttyacm", "cp210", "ftdi", "nano")
 
@@ -37,6 +40,8 @@ class HelmetLink:
         self.tx_log = deque(maxlen=6)
         self.rx_log = deque(maxlen=4)
         self.motor_flash = {"L": -1e9, "R": -1e9}      # for the on-screen motor indicators
+        self.sonar = dict.fromkeys(SONAR_NAMES)          # metres, None = no echo / no data
+        self.sonar_t = -1e9
         self._rx_buf = b""
         self._connect()
 
@@ -68,6 +73,7 @@ class HelmetLink:
                 time.sleep(0.05)
             self.status = f"Arduino on {port}"
             self.was_connected = True
+            self.send("Z1" if cfg.BUZZERS_ENABLED else "Z0")
         except Exception as e:
             self.ser = None
             self.status = f"serial error: {type(e).__name__} (simulated)"
@@ -123,11 +129,26 @@ class HelmetLink:
         while b"\n" in self._rx_buf:
             line, self._rx_buf = self._rx_buf.split(b"\n", 1)
             text = line.decode("ascii", "ignore").strip()
+            if text.startswith("U "):                     # ultrasonic report, ~8/s: not logged
+                self._parse_sonar(text)
+                continue
             if text:
                 self.rx_log.append(text)
                 if text == "BTN":
                     events.append("BTN")
         return events
+
+    def _parse_sonar(self, text):
+        try:
+            cms = [int(v) for v in text.split()[1:]]
+        except ValueError:
+            return
+        if len(cms) == len(SONAR_NAMES):
+            self.sonar = {n: (cm / 100.0 if 2 <= cm <= cfg.SONAR_MAX_CM else None) for n, cm in zip(SONAR_NAMES, cms)}
+            self.sonar_t = time.monotonic()
+
+    def sonar_fresh(self):
+        return time.monotonic() - self.sonar_t < 0.5
 
     def close(self):
         if self.ser is not None:

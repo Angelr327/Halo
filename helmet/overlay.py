@@ -161,6 +161,9 @@ class Overlay:
         line(f"profile {pol.profile_name}  light {LIGHT_NAMES[c['light']]}  zones {cfg.ZONE_METHOD}"
              f"  mirror {'on' if cfg.MIRROR_VIEW else 'OFF'}")
         line(f"serial: {link.status}")
+        if link.sonar_fresh():
+            son = "  ".join(f"{k} {'-' if v is None else f'{v:.2f}m'}" for k, v in link.sonar.items())
+            line(f"  sonar {son}", (200, 200, 120))
         tx = " ".join(list(link.tx_log)[-5:])
         rx = " ".join(list(link.rx_log)[-2:])
         line(f"  tx {tx}   rx {rx}", (170, 170, 170))

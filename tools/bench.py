@@ -21,7 +21,7 @@ def serial_cmd(args):
     if link.ser is None:
         print("No Arduino connected. Check the USB cable (must be a DATA cable) and the CH340 driver.")
         return
-    state = {"light": 0, "hb": True, "run": True}
+    state = {"light": 0, "hb": True, "run": True, "sonar": False}
 
     def heartbeat():
         while state["run"]:
@@ -31,11 +31,15 @@ def serial_cmd(args):
                 print(f"   <- {line}")
             link.rx_log.clear()
             link.poll()
+            if state["sonar"] and link.sonar_fresh():
+                print("   sonar " + "  ".join(f"{k} {'---' if v is None else f'{v * 100:3.0f}cm'}"
+                                           for k, v in link.sonar.items()))
             time.sleep(cfg.HEARTBEAT_S)
     threading.Thread(target=heartbeat, daemon=True).start()
     print("Commands: l / r / b = strong buzz left/right/both, 1 2 3 4 = pattern on both,\n"
           "          0 1 2 prefixed with m (m0 m1 m2) = light mode, f = fault buzz,\n"
           "          s = stop heartbeat (failsafe should trigger in 1.5 s), h = resume, q = quit,\n"
+          "          u = print ultrasonic distances on/off, z0 / z1 = mute / unmute buzzers,\n"
           "          anything else is sent raw (e.g. L2, R1, ?)")
     while True:
         cmd = input("> ").strip()
@@ -57,6 +61,10 @@ def serial_cmd(args):
             print("heartbeat stopped: expect FAILSAFE + long buzz, light back to normal flash")
         elif cmd == "h":
             state["hb"] = True
+        elif cmd == "u":
+            state["sonar"] = not state["sonar"]
+        elif cmd in ("z0", "z1"):
+            link.send(cmd.upper())
         elif cmd:
             link.send(cmd)
 
