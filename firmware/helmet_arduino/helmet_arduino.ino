@@ -267,7 +267,7 @@ void setup() {
   pinMode(PIN_BUZZ_R, OUTPUT);
   for (uint8_t k = 0; k < NUM_SONAR; k++) {
     pinMode(SONAR_TRIG[k], OUTPUT);
-    pinMode(SONAR_ECHO[k], INPUT);
+    pinMode(SONAR_ECHO[k], INPUT_PULLUP);   // unplugged sensor reads a steady HIGH -> -1, not noise
   }
   motorWrite(PIN_MOTOR_L, 0);
   motorWrite(PIN_MOTOR_R, 0);
