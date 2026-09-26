@@ -387,8 +387,51 @@ function makeCar() {
   label.position.set(0, 2.25, 0);
   group.add(label);
   scene.add(group);
-  return { group, bodyMat, mats, glowMat, label, ribbon: makeRibbon(), pos: null, yaw: 0, fade: 0, gone: false, data: null };
+  return { kind: 'car', group, bodyMat, mats, glowMat, label, ribbon: makeRibbon(), pos: null, yaw: 0, fade: 0,
+    gone: false, data: null };
 }
+
+// --demo-person: teammates stand in for cars, so draw them as people (a 4.4 m car at 2 m
+// would sit on top of the rider). Same tier colours, labels, glow and path as a car.
+const LIMB = new THREE.CylinderGeometry(0.065, 0.055, 0.8, 8).translate(0, -0.4, 0);   // pivots at the top
+const ARM = new THREE.CylinderGeometry(0.05, 0.045, 0.62, 8).translate(0, -0.31, 0);
+const TORSO = new THREE.CapsuleGeometry(0.17, 0.42, 6, 12);
+const HEAD = new THREE.SphereGeometry(0.12, 16, 12);
+function makePerson() {
+  const group = new THREE.Group();
+  const bodyMat = new THREE.MeshStandardMaterial({ color: TIER_HEX[0], roughness: 0.6, transparent: true });
+  const headMat = new THREE.MeshStandardMaterial({ color: 0xeef1f4, roughness: 0.6, transparent: true });
+  const mats = [bodyMat, headMat];
+  const torso = new THREE.Mesh(TORSO, bodyMat); torso.position.y = 1.22; group.add(torso);
+  const head = new THREE.Mesh(HEAD, headMat); head.position.y = 1.64; group.add(head);
+  const limbs = {};
+  for (const [name, geo, x, y] of [['legL', LIMB, -0.1, 0.86], ['legR', LIMB, 0.1, 0.86],
+    ['armL', ARM, -0.24, 1.42], ['armR', ARM, 0.24, 1.42]]) {
+    const m = new THREE.Mesh(geo, bodyMat); m.position.set(x, y, 0); group.add(m); limbs[name] = m;
+  }
+  const shadow = new THREE.Mesh(new THREE.PlaneGeometry(1.1, 1.1),
+    new THREE.MeshBasicMaterial({ map: SHADOW_TEX, transparent: true, depthWrite: false }));
+  shadow.rotation.x = -Math.PI / 2; shadow.position.y = 0.015;
+  group.add(shadow); mats.push(shadow.material);
+  const glowMat = new THREE.MeshBasicMaterial({ map: GLOW_TEX, color: 0xff8a1f, transparent: true, opacity: 0,
+    depthWrite: false, blending: THREE.AdditiveBlending });
+  const glow = new THREE.Mesh(new THREE.PlaneGeometry(2.0, 2.0), glowMat);
+  glow.rotation.x = -Math.PI / 2; glow.position.y = 0.02;
+  group.add(glow);
+  const label = makeLabel();
+  label.position.set(0, 2.25, 0);
+  group.add(label);
+  scene.add(group);
+  return { kind: 'person', group, bodyMat, mats, glowMat, label, ribbon: makeRibbon(), limbs, phase: 0, speed: 0,
+    pos: null, yaw: 0, fade: 0, gone: false, data: null };
+}
+const kindOf = (d) => (d.label === 'person' ? 'person' : 'car');
+const makeActor = (d) => (kindOf(d) === 'person' ? makePerson() : makeCar());
+// How far behind the rider an actor's centre must stay when it is in line with the bike,
+// so the model never sits on top of the rider: [half width, min distance] in metres.
+const FOOTPRINT = { car: [0.9, 2.7], person: [0.25, 1.1] };
+const NOSE = { car: 2.3, person: 0.3 };             // centre -> front, where the path strip starts
+
 function disposeCar(c) {
   scene.remove(c.group); scene.remove(c.ribbon);
   c.mats.forEach((m) => m.dispose());
@@ -430,13 +473,14 @@ let bannerKey = '';
 function describe(car) {
   const r = car.reason || '';
   const side = car.zone === 'LEFT' ? 'left' : car.zone === 'RIGHT' ? 'right' : 'behind';
+  const who = kindOf(car) === 'person' ? 'Person' : 'Car';
   let title;
-  if (r.includes('cutting in')) title = `Car cutting in from the ${side}`;
+  if (r.includes('cutting in')) title = `${who} cutting in from the ${side}`;
   else if (r.includes('close pass')) title = `Close pass on your ${side}`;
-  else if (r.includes('closing behind')) title = 'Car closing behind';
-  else if (r.includes('behind')) title = 'Car closing fast behind';
-  else if (r.includes('alongside')) title = `Car in your ${side} blind spot`;
-  else title = `Car approaching your ${side} blind spot`;
+  else if (r.includes('closing behind')) title = `${who} closing behind`;
+  else if (r.includes('behind')) title = `${who} closing fast behind`;
+  else if (r.includes('alongside')) title = `${who} in your ${side} blind spot`;
+  else title = `${who} approaching your ${side} blind spot`;
   const bits = [];
   if (car.ttc != null && !car.alongside) bits.push(`${car.ttc.toFixed(1)} s to reach you`);
   if (!car.alongside && car.z != null) bits.push(`${car.z.toFixed(0)} m back`);
@@ -474,7 +518,13 @@ function onState(data) {
   for (const d of data.cars) {
     seen.add(d.id);
     let c = cars.get(d.id);
-    if (!c) { c = makeCar(); cars.set(d.id, c); }
+    if (c && c.kind !== kindOf(d)) { disposeCar(c); c = null; }       // tracker changed its mind on the class
+    if (!c) { c = makeActor(d); cars.set(d.id, c); }
+    if (c.data && c.kind === 'person') {
+      const dt = Math.max(0.03, data.t - c.lastT);
+      c.speed += (Math.hypot(d.x - c.data.x, d.z - c.data.z) / dt - c.speed) * 0.3;
+    }
+    c.lastT = data.t;
     c.data = d; c.gone = false;
     if (!c.pos) c.pos = { x: W(d.x), z: d.z };
   }
@@ -490,7 +540,10 @@ function onState(data) {
     cap.appendChild(document.createTextNode(data.caption.text));
     cap.classList.remove('hidden');
   } else cap.classList.add('hidden');
-  $('scene').innerHTML = data.scene ? `<b>SIMULATOR</b> &middot; ${data.scene.replace(/[<&]/g, '')}` : '';
+  const lines = [];
+  if (data.demo_person) lines.push('<b>DEMO MODE</b> &middot; people stand in for cars');
+  if (data.scene) lines.push(`<b>SIMULATOR</b> &middot; ${data.scene.replace(/[<&]/g, '')}`);
+  $('scene').innerHTML = lines.join('<br>');
 
   const son = Object.entries(data.sonar || {}).filter(([, v]) => v != null).map(([k, v]) => `${k} ${v.toFixed(2)} m`);
   $('stats').textContent = [`${data.fps} fps`, data.det_ms ? `det ${data.det_ms} ms` : null,
@@ -534,11 +587,21 @@ function frame() {
     const d = c.data;
     c.fade = Math.min(1, Math.max(0, c.fade + (c.gone || !connected ? -dt / 0.4 : dt / 0.25)));
     if (c.gone && c.fade <= 0) { disposeCar(c); cars.delete(id); continue; }
+    const [halfW, minZ] = FOOTPRINT[c.kind];
+    const inLine = Math.abs(d.x) < halfW + 0.4;          // overlaps the bike sideways
+    const zt = inLine ? Math.max(d.z, minZ) : d.z;
     c.pos.x += (W(d.x) - c.pos.x) * k;
-    c.pos.z += (d.z - c.pos.z) * k;
+    c.pos.z += (zt - c.pos.z) * k;
+    if (c.kind === 'person') {                           // swing legs and arms at walking pace
+      const amp = Math.min(0.65, c.speed * 0.32) * (d.live ? 1 : 0);
+      c.phase += dt * (2 + c.speed * 3.2);
+      const sw = Math.sin(c.phase) * amp;
+      c.limbs.legL.rotation.x = sw; c.limbs.legR.rotation.x = -sw;
+      c.limbs.armL.rotation.x = -sw * 0.8; c.limbs.armR.rotation.x = sw * 0.8;
+    }
     // face where it's heading: toward its predicted meeting point with you
     let yaw = 0;
-    if (d.path != null && c.pos.z > 2) yaw = Math.max(-0.45, Math.min(0.45, Math.atan2(-(W(d.path) - c.pos.x), c.pos.z)));
+    if (d.path != null && c.pos.z > NOSE[c.kind] + 0.3) yaw = Math.max(-0.45, Math.min(0.45, Math.atan2(-(W(d.path) - c.pos.x), c.pos.z)));
     c.yaw += (yaw - c.yaw) * k;
     c.group.position.set(c.pos.x, 0, c.pos.z);
     c.group.rotation.y = c.yaw;
@@ -551,10 +614,10 @@ function frame() {
       : d.alongside ? 'beside' : `${Math.round(d.z)} m`;
     setLabel(c.label, text, tier);
     c.label.material.opacity = c.fade;
-    const showPath = d.path != null && (d.on_path || tier >= 2) && !d.alongside && c.pos.z > 1.5;
+    const showPath = d.path != null && (d.on_path || tier >= 2) && !d.alongside && c.pos.z > NOSE[c.kind] + 0.6;
     c.ribbon.visible = showPath;
     if (showPath) {
-      setRibbon(c.ribbon, c.pos.x, c.pos.z - 2.3, W(d.path), 0.6, 0.14);
+      setRibbon(c.ribbon, c.pos.x, c.pos.z - NOSE[c.kind], W(d.path), 0.6, 0.14);
       c.ribbon.material.color.setHex(TIER_HEX[Math.max(tier, 2)]);
       c.ribbon.material.opacity = 0.75 * c.fade;
     }
