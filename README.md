@@ -76,6 +76,7 @@ python -m helmet.main --no-gemini              # prove it works fully offline
 python -m helmet.main --agent                  # Gemini tool calling
 python -m helmet.main --log run.csv            # per-frame metrics for calibration
 python -m helmet.main --model yolo26n.pt       # swap detector
+python -m helmet.main --sim                    # scripted traffic, no camera/YOLO; open http://<ip>:8080/view
 ```
 
 | Key | Action | Key | Action |
@@ -133,6 +134,25 @@ Check it before mounting: flash the sketch from the Pi with `bash scripts/flash_
 You should feel left then right at power-up; `l` / `r` buzz each side (strong also beeps);
 `u` prints the four distances (wave a hand in front of each sensor); `z0` mutes the buzzers.
 Total draw is roughly 250 mA from the Pi's USB (see the power note above).
+
+## 2.5D view (phone or laptop)
+
+Open **`http://<pi-ip>:8080/view`** (the startup line prints it). It's a 3D rear-view mirror:
+your bike in front, the road behind you, and every tracked car placed where the pipeline
+measured it, tinted by alert tier (grey tracked, yellow approaching, orange blind spot, red
+danger). The blind-spot zones and screen edges light up from the **same state the OLED shows**,
+with the same arrows and the same 4 Hz blink for HIGH, so the phone, OLED and buzz always agree.
+Cars show their time-to-contact, a cutting-in car shows its predicted path, and the ultrasonic
+sensors draw arcs beside the bike. The camera button adds the live debug feed.
+
+- **How:** the Pi sends a ~700-byte JSON snapshot per frame over `/state` (server-sent events);
+  the phone draws the scene with three.js, which is bundled, so it works on a hotspot with no
+  internet. No video is sent for the view itself.
+- **No hardware?** `python -m helmet.main --sim` runs scripted traffic (car behind, normal left
+  pass, car cutting in, close pass right, two cars, steady follower) through the real tracker,
+  alerts, OLED and Arduino. Good for building the view and as a demo backup.
+- **Laptop:** add `--stream 8080` to any run (`--video clip.mp4 --stream 8080`).
+- Distance comes from one camera (±20-30%); side and time-to-contact are the reliable parts.
 
 ## Transparent OLED HUD (Pi)
 

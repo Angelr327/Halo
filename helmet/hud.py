@@ -103,6 +103,11 @@ class Hud:
         self._wake = threading.Event()
         threading.Thread(target=self._loop, daemon=True).start()
 
+    @property
+    def state(self):
+        """What the panel is showing now: {zone: tier}, after the hold."""
+        return dict(self._state)
+
     def update(self, tracks, fault=False):
         """Called once per frame from the main loop. Cheap: no drawing, no I/O."""
         now = time.monotonic()
