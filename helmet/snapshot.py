@@ -1,0 +1,69 @@
+"""The snapshot feed: a small JSON picture of the scene for the 2.5D web view.
+
+Every frame (up to ~15 times a second) the main loop turns the tracker's state into a few hundred bytes:
+where each car is (metres), its confirmed alert tier, its predicted path, what the OLED is
+showing, and the ultrasonic readings. The phone draws the 3D scene from these numbers, so
+the Pi never renders or sends video for the view.
+
+Coordinates are the rider's: x = metres to the right (negative = left), z = metres behind.
+"""
+import math
+import time
+
+from . import config as cfg
+
+MAX_Z = 40.0          # beyond this the monocular distance is too rough to draw
+ALONGSIDE_Z = 1.0     # a box cut off by the frame edge is beside the rider: draw it there
+
+
+def _r(v, nd=2):
+    return None if v is None or not math.isfinite(v) else round(v, nd)
+
+
+def build(tracks, t, *, hud_state, fault=False, shaky=False, light=0, fps=0.0, det_ms=0.0,
+          link=None, profile="", captions=(), scene=None):
+    cars = []
+    for tr in tracks:
+        if tr.lat_m is None or tr.dist_m is None:
+            continue                                     # not measured yet (too few frames / too small)
+        if not tr.matched_now and tr.coasting(t):
+            continue                                     # lost: let the view fade it out
+        cars.append({
+            "id": tr.id,
+            "label": tr.label,
+            "x": _r(tr.lat_m),
+            "z": _r(ALONGSIDE_Z if tr.alongside else min(tr.dist_m, MAX_Z)),
+            "zone": tr.zone,
+            "tier": tr.shown_tier,
+            "ttc": _r(tr.ttc, 1),
+            "path": _r(tr.pred_lat_m),
+            "on_path": bool(tr.on_path),
+            "alongside": bool(tr.alongside),
+            "live": bool(tr.matched_now),
+            "reason": tr.reason,
+        })
+    sonar = {}
+    if link is not None and link.sonar_fresh():
+        sonar = {k: _r(v) for k, v in link.sonar.items()}
+    caption = None
+    if captions:
+        ts, src, text = list(captions)[-1]                # latest spoken line, if recent
+        age = time.monotonic() - ts
+        if age < 6.0:
+            caption = {"text": text, "src": src, "age": round(age, 1)}
+    return {
+        "t": round(t, 3),
+        "cars": cars,
+        "hud": dict(hud_state),                          # exactly what the OLED is showing
+        "fault": bool(fault),
+        "shaky": bool(shaky),
+        "light": light,
+        "fps": round(fps, 1),
+        "det_ms": round(det_ms),
+        "serial": link.status if link is not None else "",
+        "sonar": sonar,
+        "profile": profile,
+        "caption": caption,
+        "scene": scene,
+        "corridor_half_m": cfg.RIDER_HALF_WIDTH_M + cfg.CORRIDOR_MARGIN_M,
+    }

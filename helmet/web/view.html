@@ -1,0 +1,589 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<link rel="icon" href="data:,">
+<title>Blindspot 2.5D View</title>
+<style>
+  :root {
+    --bg: #0b0e13; --panel: rgba(18, 23, 31, 0.78); --line: rgba(255, 255, 255, 0.08);
+    --text: #e8ecf1; --muted: #8a94a3; --accent: #3ea6ff;
+    --yellow: #f2c94c; --orange: #ff8a1f; --red: #ff3b30; --green: #3ddc97;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font: 14px/1.35 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; overflow: hidden; }
+  canvas#c { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; }
+
+  header { position: fixed; top: 0; left: 0; right: 0; display: flex; align-items: center; gap: 10px;
+    padding: 10px max(12px, env(safe-area-inset-right)) 10px max(12px, env(safe-area-inset-left));
+    background: linear-gradient(var(--bg), rgba(11, 14, 19, 0)); z-index: 5; }
+  .brand { font-weight: 700; letter-spacing: 0.14em; font-size: 13px; }
+  .pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; border-radius: 99px;
+    background: var(--panel); border: 1px solid var(--line); font-size: 12px; color: var(--muted); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--red); }
+  .live .dot { background: var(--green); box-shadow: 0 0 8px var(--green); }
+  #stats { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; flex: 1;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  button { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 10px;
+    padding: 6px 11px; font: inherit; font-size: 12px; cursor: pointer; }
+
+  .edge { position: fixed; pointer-events: none; opacity: 0; transition: opacity 0.12s; z-index: 2; }
+  .edge.left { left: 0; top: 0; bottom: 0; width: 24vw; background: linear-gradient(90deg, var(--c), transparent); }
+  .edge.right { right: 0; top: 0; bottom: 0; width: 24vw; background: linear-gradient(270deg, var(--c), transparent); }
+  .edge.top { left: 0; right: 0; top: 0; height: 30vh; background: linear-gradient(180deg, var(--c), transparent); }
+
+  #banner { position: fixed; top: 58px; left: 50%; transform: translateX(-50%); z-index: 6;
+    display: flex; align-items: center; gap: 14px; padding: 12px 20px 12px 14px; border-radius: 18px;
+    background: var(--panel); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+    border: 2px solid var(--c, var(--orange)); max-width: calc(100vw - 24px); transition: opacity 0.15s; }
+  #banner.hidden { opacity: 0; pointer-events: none; }
+  #banner svg { width: 34px; height: 44px; flex: none; fill: var(--c, var(--orange)); }
+  #banner.dim { border-color: transparent; }
+  #banner.dim svg { fill: none; stroke: var(--c); stroke-width: 3; }
+  #bTitle { font-size: 18px; font-weight: 700; }
+  #bSub { color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+
+  #caption { position: fixed; left: 50%; transform: translateX(-50%); bottom: 18px; z-index: 6;
+    padding: 8px 14px; border-radius: 12px; background: var(--panel); max-width: min(620px, calc(100vw - 24px));
+    font-size: 15px; transition: opacity 0.3s; }
+  #caption .src { color: var(--accent); font-size: 11px; font-weight: 700; letter-spacing: 0.1em; margin-right: 8px; }
+  #caption.hidden { opacity: 0; }
+
+  #corner { position: fixed; left: 12px; top: 52px; z-index: 4; display: flex; flex-direction: column; gap: 6px;
+    max-width: 30vw; }
+  #scene { color: var(--muted); font-size: 12px; }
+  #scene b { color: var(--accent); letter-spacing: 0.08em; }
+  .legend { display: flex; flex-wrap: wrap; gap: 4px 12px; color: var(--muted); font-size: 11px; }
+  .legend i { display: inline-block; width: 9px; height: 9px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
+
+  #cam { position: fixed; right: 12px; top: 52px; z-index: 4; width: min(30vw, 400px);
+    border-radius: 12px; overflow: hidden; border: 1px solid var(--line); background: #000; }
+  #cam img { display: block; width: 100%; }
+  #cam.hidden { display: none; }
+
+  .overlay { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center;
+    justify-content: center; gap: 12px; z-index: 8; background: rgba(11, 14, 19, 0.72); text-align: center; }
+  .overlay.hidden { display: none; }
+  .overlay .big { font-size: 22px; font-weight: 700; }
+  .overlay .sub { color: var(--muted); }
+  #fault svg { width: 90px; height: 90px; stroke: var(--red); stroke-width: 10; stroke-linecap: round; }
+
+  @media (max-width: 640px) {
+    #banner { top: 50px; padding: 10px 14px 10px 10px; gap: 10px; width: calc(100vw - 24px); }
+    #bTitle { font-size: 16px; }
+    #cam { width: 46vw; top: auto; bottom: 60px; }
+    #corner { top: auto; bottom: 60px; max-width: 50vw; }
+    #caption { bottom: 12px; }
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="edgeL" class="edge left"></div>
+<div id="edgeR" class="edge right"></div>
+<div id="edgeB" class="edge top"></div>
+
+<header>
+  <div class="brand">BLINDSPOT</div>
+  <div id="status" class="pill"><span class="dot"></span><span id="statusText">connecting</span></div>
+  <div id="stats"></div>
+  <button id="camBtn" type="button">Camera</button>
+</header>
+
+<div id="banner" class="hidden">
+  <svg id="arrow" viewBox="0 0 44 64"></svg>
+  <div><div id="bTitle"></div><div id="bSub"></div></div>
+</div>
+
+<div id="cam"><img id="camImg" alt="rear camera"></div>
+
+<div id="corner">
+  <div id="scene"></div>
+  <div class="legend">
+    <span><i style="background:#d4d9e0"></i>tracked</span>
+    <span><i style="background:var(--yellow)"></i>approaching</span>
+    <span><i style="background:var(--orange)"></i>blind spot</span>
+    <span><i style="background:var(--red)"></i>danger</span>
+  </div>
+</div>
+<div id="caption" class="hidden"></div>
+
+<div id="fault" class="overlay hidden">
+  <svg viewBox="0 0 100 100"><line x1="15" y1="15" x2="85" y2="85"/><line x1="85" y1="15" x2="15" y2="85"/></svg>
+  <div class="big">Rear camera offline</div>
+  <div class="sub">Alerts are paused. The rear light is back to a normal flash.</div>
+</div>
+<div id="wait" class="overlay">
+  <div class="big">Waiting for the helmet&hellip;</div>
+  <div class="sub">Start it with <code>python -m helmet.main</code> (or <code>--sim</code>)</div>
+</div>
+
+<script type="module">
+import * as THREE from '/static/three.module.min.js';
+
+// ------------------------------------------------------------------ constants
+// The view is a 3D rear-view mirror: the camera sits ahead of the rider looking back, so near
+// cars are big, far cars small, and (like any mirror) the rider's left is on the screen's left.
+// World units are metres, z = metres behind the rider. A camera looking back sees world -x on
+// its right, so the rider's lateral offset maps to world x = -lat (W below).
+const TIER_HEX = { 0: 0xd4d9e0, 1: 0xf2c94c, 2: 0xff8a1f, 3: 0xff3b30 };
+const TIER_CSS = { 1: 'var(--yellow)', 2: 'var(--orange)', 3: 'var(--red)' };
+const BLINK_HZ = 4;                      // same as the OLED's HIGH blink
+const ROAD_HALF = 6.5;
+const qs = new URLSearchParams(location.search);
+const tok = qs.get('t');
+const $ = (id) => document.getElementById(id);
+const W = (lat) => -lat;                 // rider's lateral offset (m, + = right) -> world x
+
+// ------------------------------------------------------------------ renderer / camera
+const canvas = $('c');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0b0e13);
+scene.fog = new THREE.Fog(0x0b0e13, 34, 62);
+const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 200);
+
+function placeCamera() {
+  const w = window.innerWidth, h = window.innerHeight;
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h;
+  if (camera.aspect < 0.8) {             // phone, portrait: higher, to fit the road width
+    camera.fov = 60; camera.position.set(0, 11.5, -9.5); camera.lookAt(0, 0, 7.5);
+  } else {                               // laptop / landscape
+    camera.fov = 46; camera.position.set(0, 7.2, -8.2); camera.lookAt(0, 0, 6.5);
+  }
+  camera.updateProjectionMatrix();
+}
+window.addEventListener('resize', placeCamera);
+placeCamera();
+
+scene.add(new THREE.HemisphereLight(0xffffff, 0x1b2029, 1.15));
+const sun = new THREE.DirectionalLight(0xffffff, 1.5);
+sun.position.set(5, 14, -10);
+scene.add(sun);
+
+// ------------------------------------------------------------------ small helpers
+function canvasTexture(w, h, draw) {
+  const cv = document.createElement('canvas');
+  cv.width = w; cv.height = h;
+  draw(cv.getContext('2d'), w, h);
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+const radial = (inner, outer) => canvasTexture(128, 128, (g, w, h) => {
+  const grd = g.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, w / 2);
+  grd.addColorStop(0, inner); grd.addColorStop(1, outer);
+  g.fillStyle = grd; g.fillRect(0, 0, w, h);
+});
+const SHADOW_TEX = radial('rgba(0,0,0,0.75)', 'rgba(0,0,0,0)');
+const GLOW_TEX = radial('rgba(255,255,255,1)', 'rgba(255,255,255,0)');
+
+function flat(w, d, mat, x = 0, z = 0, y = 0.005) {       // a rectangle lying on the road
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(w, d), mat);
+  m.rotation.x = -Math.PI / 2;
+  m.position.set(x, y, z);
+  scene.add(m);
+  return m;
+}
+function groundText(text, x, z, size, color, opacity) {
+  const tex = canvasTexture(512, 128, (g, w, h) => {
+    g.fillStyle = color; g.font = '600 64px system-ui, sans-serif';
+    g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(text, w / 2, h / 2);
+  });
+  const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity, depthWrite: false });
+  const m = flat(size * 4, size, mat, x, z, 0.012);
+  m.rotation.set(-Math.PI / 2, 0, Math.PI);   // readable from a camera looking back down the road
+  return m;
+}
+function cylinder(a, b, r, mat) {                         // a rod between two points
+  const va = new THREE.Vector3(...a), vb = new THREE.Vector3(...b);
+  const len = va.distanceTo(vb);
+  const m = new THREE.Mesh(new THREE.CylinderGeometry(r, r, len, 10), mat);
+  m.position.copy(va).add(vb).multiplyScalar(0.5);
+  m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), vb.clone().sub(va).normalize());
+  return m;
+}
+
+// ------------------------------------------------------------------ road
+flat(80, 100, new THREE.MeshStandardMaterial({ color: 0x0f1319, roughness: 1 }), 0, 20, 0);
+flat(ROAD_HALF * 2, 90, new THREE.MeshStandardMaterial({ color: 0x1a2029, roughness: 0.95 }), 0, 30, 0.002);
+const edgeMat = new THREE.MeshBasicMaterial({ color: 0x3a4452 });
+for (const x of [-ROAD_HALF, ROAD_HALF]) flat(0.08, 90, edgeMat, x, 30, 0.006);
+const ringMat = new THREE.MeshBasicMaterial({ color: 0x2a323d });
+for (const z of [5, 10, 20, 30]) {
+  flat(ROAD_HALF * 2, 0.05, ringMat, 0, z, 0.006);
+  const tex = canvasTexture(256, 96, (g, w, h) => {       // upright label: readable at any distance
+    g.fillStyle = '#7d8796'; g.font = '600 56px system-ui, sans-serif';
+    g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(`${z} m`, w / 2, h / 2);
+  });
+  const lab = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, opacity: 0.75, depthWrite: false }));
+  const sz = 0.45 + z * 0.022;                            // grows with distance so far labels stay legible
+  lab.scale.set(sz * 2.67, sz, 1);
+  lab.position.set(W(4.3), sz / 2 + 0.05, z);             // inside the road: visible on a phone too
+  scene.add(lab);
+}
+
+// Your lane (bike + margin) and the two blind-spot zones. They light up from the SAME
+// state the OLED shows (snapshot "hud"), so the phone, the OLED and the buzz always agree.
+let corridorHalf = 0.6;
+const laneMat = new THREE.MeshBasicMaterial({ color: 0x3ea6ff, transparent: true, opacity: 0.07, depthWrite: false });
+const lane = flat(corridorHalf * 2, 60, laneMat, 0, 30, 0.008);
+const laneEdgeMat = new THREE.MeshBasicMaterial({ color: 0x3ea6ff, transparent: true, opacity: 0.35 });
+const laneEdges = [-1, 1].map((s) => flat(0.04, 60, laneEdgeMat, s * corridorHalf, 30, 0.009));
+
+const ZONE_W = 3.2, ZONE_Z0 = -1.5, ZONE_Z1 = 6.0;
+const zones = {};
+for (const [name, s] of [['LEFT', -1], ['RIGHT', 1]]) {
+  const x = W(s * (corridorHalf + ZONE_W / 2));
+  const z = (ZONE_Z0 + ZONE_Z1) / 2;
+  const fill = flat(ZONE_W, ZONE_Z1 - ZONE_Z0,
+    new THREE.MeshBasicMaterial({ color: 0xff8a1f, transparent: true, opacity: 0, depthWrite: false }), x, z, 0.01);
+  const outline = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.PlaneGeometry(ZONE_W, ZONE_Z1 - ZONE_Z0)),
+    new THREE.LineBasicMaterial({ color: 0x8a94a3, transparent: true, opacity: 0.18 }));
+  outline.rotation.x = -Math.PI / 2; outline.position.set(x, 0.011, z);
+  scene.add(outline);
+  groundText('BLIND SPOT', x, 3.2, 0.42, '#8a94a3', 0.35);
+  zones[name] = { fill, outline };
+}
+function setCorridor(half) {
+  if (!half || Math.abs(half - corridorHalf) < 1e-3) return;
+  corridorHalf = half;
+  lane.scale.x = half / 0.6;
+  laneEdges.forEach((m, i) => (m.position.x = (i ? 1 : -1) * half));
+  for (const [name, s] of [['LEFT', -1], ['RIGHT', 1]]) {
+    const x = W(s * (half + ZONE_W / 2));
+    zones[name].fill.position.x = x; zones[name].outline.position.x = x;
+  }
+}
+
+// ------------------------------------------------------------------ the rider
+const bike = new THREE.Group();
+const frameMat = new THREE.MeshStandardMaterial({ color: 0x9aa3ad, roughness: 0.5, metalness: 0.4 });
+const riderMat = new THREE.MeshStandardMaterial({ color: 0xe6e9ee, roughness: 0.6 });
+const helmetMat = new THREE.MeshStandardMaterial({ color: 0x3ea6ff, roughness: 0.35, emissive: 0x0f3a66, emissiveIntensity: 0.6 });
+for (const z of [-0.52, 0.52]) {
+  const wheel = new THREE.Mesh(new THREE.TorusGeometry(0.33, 0.04, 10, 28), new THREE.MeshStandardMaterial({ color: 0x20252c }));
+  wheel.rotation.y = Math.PI / 2; wheel.position.set(0, 0.34, z);
+  bike.add(wheel);
+}
+bike.add(cylinder([0, 0.34, 0.52], [0, 0.62, 0.02], 0.025, frameMat));    // chain stay / seat tube
+bike.add(cylinder([0, 0.62, 0.02], [0, 0.78, -0.42], 0.025, frameMat));   // top tube
+bike.add(cylinder([0, 0.34, -0.52], [0, 0.95, -0.46], 0.025, frameMat));  // fork
+bike.add(cylinder([-0.32, 0.95, -0.46], [0.32, 0.95, -0.46], 0.02, frameMat)); // handlebar
+const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.17, 0.42, 6, 12), riderMat);
+torso.position.set(0, 1.18, -0.08); torso.rotation.x = -0.95;
+bike.add(torso);
+const head = new THREE.Mesh(new THREE.SphereGeometry(0.15, 20, 14), helmetMat);
+head.scale.set(1, 0.85, 1.25); head.position.set(0, 1.46, -0.42);
+bike.add(head);
+for (const s of [-1, 1]) {
+  bike.add(cylinder([s * 0.17, 1.33, -0.25], [s * 0.3, 0.97, -0.46], 0.045, riderMat)); // arms
+  bike.add(cylinder([s * 0.1, 0.98, 0.12], [s * 0.1, 0.42, -0.05], 0.06, riderMat));    // legs
+}
+scene.add(bike);
+const halo = flat(2.6, 2.6, new THREE.MeshBasicMaterial({ map: GLOW_TEX, color: 0x3ea6ff, transparent: true,
+  opacity: 0.35, depthWrite: false, blending: THREE.AdditiveBlending }), 0, 0, 0.013);
+
+// ------------------------------------------------------------------ cars
+// One fixed-size, Tesla-style car for every track (people in --demo-person too).
+function extrudeProfile(points, width, bevel) {
+  const shape = new THREE.Shape();
+  points.forEach(([z, y], i) => (i ? shape.lineTo(-z, y) : shape.moveTo(-z, y)));
+  const depth = width - 2 * bevel;
+  const g = new THREE.ExtrudeGeometry(shape, { depth, bevelEnabled: true, bevelSize: bevel,
+    bevelThickness: bevel, bevelSegments: 3, curveSegments: 6 });
+  g.translate(0, 0, -depth / 2);
+  g.rotateY(Math.PI / 2);                // profile x -> world -z, extrusion -> world x
+  return g;
+}
+const CAR_BODY = extrudeProfile([[-2.2, 0.3], [-2.2, 0.64], [-2.02, 0.8], [-0.85, 0.87], [1.95, 0.9],
+  [2.2, 0.78], [2.2, 0.3]], 1.8, 0.08);
+const CAR_CABIN = extrudeProfile([[-0.95, 0.85], [-0.22, 1.38], [1.08, 1.4], [1.78, 0.86]], 1.52, 0.06);
+const CAR_ROOF = new THREE.BoxGeometry(1.36, 0.05, 1.12);
+const WHEEL = new THREE.CylinderGeometry(0.33, 0.33, 0.24, 18).rotateZ(Math.PI / 2);
+const TAIL = new THREE.BoxGeometry(0.42, 0.1, 0.04);
+const glassMat = new THREE.MeshStandardMaterial({ color: 0x18202b, roughness: 0.2, metalness: 0.3 });
+const tyreMat = new THREE.MeshStandardMaterial({ color: 0x0d1015, roughness: 0.9 });
+const tailMat = new THREE.MeshStandardMaterial({ color: 0xfff4d6, emissive: 0xfff0c8, emissiveIntensity: 1.0 });
+
+function makeLabel() {
+  const cv = document.createElement('canvas');
+  cv.width = 256; cv.height = 80;
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true }));
+  sprite.scale.set(2.3, 0.72, 1);
+  sprite.renderOrder = 10;
+  sprite.userData = { cv, tex, text: '' };
+  return sprite;
+}
+function setLabel(sprite, text, tier) {
+  const key = text + '|' + tier;
+  if (sprite.userData.text === key) return;
+  sprite.userData.text = key;
+  const { cv, tex } = sprite.userData;
+  const g = cv.getContext('2d');
+  g.clearRect(0, 0, cv.width, cv.height);
+  g.fillStyle = tier >= 1 ? '#' + TIER_HEX[tier].toString(16).padStart(6, '0') : 'rgba(18,23,31,0.85)';
+  g.beginPath();
+  if (g.roundRect) g.roundRect(28, 8, 200, 64, 32); else g.rect(28, 8, 200, 64);
+  g.fill();
+  g.fillStyle = tier >= 1 ? '#0b0e13' : '#e8ecf1';
+  g.font = '700 40px system-ui, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillText(text, 128, 42);
+  tex.needsUpdate = true;
+}
+
+function makeRibbon() {                   // predicted path: flat strip from the car to where it meets you
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(12), 3));
+  geo.setIndex([0, 1, 2, 2, 1, 3]);
+  const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: 0xff8a1f, transparent: true, opacity: 0.8,
+    depthWrite: false, side: THREE.DoubleSide }));
+  mesh.frustumCulled = false;
+  scene.add(mesh);
+  return mesh;
+}
+function setRibbon(mesh, x0, z0, x1, z1, w) {
+  const dx = x1 - x0, dz = z1 - z0, len = Math.hypot(dx, dz) || 1;
+  const nx = (-dz / len) * w / 2, nz = (dx / len) * w / 2;
+  const p = mesh.geometry.attributes.position.array;
+  p.set([x0 + nx, 0.03, z0 + nz, x0 - nx, 0.03, z0 - nz, x1 + nx, 0.03, z1 + nz, x1 - nx, 0.03, z1 - nz]);
+  mesh.geometry.attributes.position.needsUpdate = true;
+}
+
+function makeCar() {
+  const group = new THREE.Group();
+  const bodyMat = new THREE.MeshStandardMaterial({ color: TIER_HEX[0], roughness: 0.5, metalness: 0.15, transparent: true });
+  const glass = glassMat.clone(), tyre = tyreMat.clone(), tail = tailMat.clone();
+  const mats = [bodyMat, glass, tyre, tail];                // per car, so the whole car fades in/out
+  for (const m of [glass, tyre, tail]) m.transparent = true;
+  group.add(new THREE.Mesh(CAR_BODY, bodyMat));
+  group.add(new THREE.Mesh(CAR_CABIN, glass));
+  const roof = new THREE.Mesh(CAR_ROOF, bodyMat);
+  roof.position.set(0, 1.43, 0.43);
+  group.add(roof);
+  for (const x of [-0.82, 0.82]) for (const z of [-1.35, 1.4]) {
+    const w = new THREE.Mesh(WHEEL, tyre); w.position.set(x, 0.33, z); group.add(w);
+  }
+  for (const x of [-0.66, 0.66]) {
+    const t = new THREE.Mesh(TAIL, tail);
+    t.position.set(x, 0.66, -2.25); group.add(t);         // headlights: the mirror sees car fronts
+  }
+  const shadow = new THREE.Mesh(new THREE.PlaneGeometry(2.5, 5.2),
+    new THREE.MeshBasicMaterial({ map: SHADOW_TEX, transparent: true, depthWrite: false }));
+  shadow.rotation.x = -Math.PI / 2; shadow.position.y = 0.015;
+  group.add(shadow); mats.push(shadow.material);
+  const glowMat = new THREE.MeshBasicMaterial({ map: GLOW_TEX, color: 0xff8a1f, transparent: true, opacity: 0,
+    depthWrite: false, blending: THREE.AdditiveBlending });
+  const glow = new THREE.Mesh(new THREE.PlaneGeometry(3.4, 6.4), glowMat);
+  glow.rotation.x = -Math.PI / 2; glow.position.y = 0.02;
+  group.add(glow);
+  const label = makeLabel();
+  label.position.set(0, 2.25, 0);
+  group.add(label);
+  scene.add(group);
+  return { group, bodyMat, mats, glowMat, label, ribbon: makeRibbon(), pos: null, yaw: 0, fade: 0, gone: false, data: null };
+}
+function disposeCar(c) {
+  scene.remove(c.group); scene.remove(c.ribbon);
+  c.mats.forEach((m) => m.dispose());
+  c.glowMat.dispose(); c.ribbon.geometry.dispose(); c.ribbon.material.dispose();
+  c.label.material.map.dispose(); c.label.material.dispose();
+}
+
+// ------------------------------------------------------------------ ultrasonic arcs
+const SONAR_DIR = { SL: 315, SR: 225, BL: 285, BR: 255 };     // degrees, ring-local (after laying it flat)
+const sonarArcs = {};
+function updateSonar(sonar) {
+  for (const k of Object.keys(SONAR_DIR)) {
+    const r = sonar ? sonar[k] : null;
+    let arc = sonarArcs[k];
+    if (r == null || r > 3) { if (arc) arc.mesh.visible = false; continue; }
+    if (!arc) {
+      const mesh = new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshBasicMaterial({ transparent: true,
+        opacity: 0.85, depthWrite: false, side: THREE.DoubleSide }));
+      mesh.rotation.x = -Math.PI / 2; mesh.position.y = 0.03;
+      scene.add(mesh);
+      arc = sonarArcs[k] = { mesh, r: -1 };
+    }
+    arc.mesh.visible = true;
+    if (Math.abs(arc.r - r) > 0.03) {
+      arc.r = r;
+      const a = (SONAR_DIR[k] - 20) * Math.PI / 180;
+      arc.mesh.geometry.dispose();
+      arc.mesh.geometry = new THREE.RingGeometry(Math.max(0.2, r - 0.07), r + 0.07, 24, 1, a, 40 * Math.PI / 180);
+      arc.mesh.material.color.setHex(r < 1 ? 0xff3b30 : r < 2 ? 0xff8a1f : 0x3ddc97);
+    }
+  }
+}
+
+// ------------------------------------------------------------------ banner, edges, captions
+const ARROW_LEFT = '<polygon points="2,32 24,6 24,20 42,20 42,44 24,44 24,58"/>';
+const ARROW_RIGHT = '<polygon points="42,32 20,6 20,20 2,20 2,44 20,44 20,58"/>';
+const CHEVRONS = '<polygon points="6,6 22,20 38,6 38,16 22,30 6,16"/><polygon points="6,28 22,42 38,28 38,38 22,52 6,38"/>';
+let bannerKey = '';
+function describe(car) {
+  const r = car.reason || '';
+  const side = car.zone === 'LEFT' ? 'left' : car.zone === 'RIGHT' ? 'right' : 'behind';
+  let title;
+  if (r.includes('cutting in')) title = `Car cutting in from the ${side}`;
+  else if (r.includes('close pass')) title = `Close pass on your ${side}`;
+  else if (r.includes('closing behind')) title = 'Car closing behind';
+  else if (r.includes('behind')) title = 'Car closing fast behind';
+  else if (r.includes('alongside')) title = `Car in your ${side} blind spot`;
+  else title = `Car approaching your ${side} blind spot`;
+  const bits = [];
+  if (car.ttc != null && !car.alongside) bits.push(`${car.ttc.toFixed(1)} s to reach you`);
+  if (!car.alongside && car.z != null) bits.push(`${car.z.toFixed(0)} m back`);
+  if (car.alongside) bits.push('beside you now');
+  return { title, sub: bits.join(' · '), zone: car.zone };
+}
+function updateBanner(data) {
+  const threats = data.cars.filter((c) => c.live && c.tier >= 2).sort((a, b) => b.tier - a.tier || a.z - b.z);
+  const hudTier = Math.max(0, ...Object.values(data.hud));
+  const b = $('banner');
+  if (!threats.length && !hudTier) { b.classList.add('hidden'); bannerKey = ''; return; }
+  if (threats.length) {
+    const top = threats[0], d = describe(top);
+    $('bTitle').textContent = d.title; $('bSub').textContent = d.sub;
+    b.style.setProperty('--c', TIER_CSS[top.tier]);
+    const key = d.zone;
+    if (key !== bannerKey) {
+      bannerKey = key;
+      const svg = $('arrow');
+      svg.setAttribute('viewBox', key === 'CENTER' ? '0 0 44 58' : '0 0 44 64');
+      svg.innerHTML = key === 'LEFT' ? ARROW_LEFT : key === 'RIGHT' ? ARROW_RIGHT : CHEVRONS;
+    }
+    b.dataset.tier = top.tier;
+  }
+  b.classList.remove('hidden');
+}
+
+// ------------------------------------------------------------------ state from the Pi
+const cars = new Map();
+let last = null, lastMsg = 0, fps = 0;
+function onState(data) {
+  last = data; lastMsg = performance.now();
+  setCorridor(data.corridor_half_m);
+  const seen = new Set();
+  for (const d of data.cars) {
+    seen.add(d.id);
+    let c = cars.get(d.id);
+    if (!c) { c = makeCar(); cars.set(d.id, c); }
+    c.data = d; c.gone = false;
+    if (!c.pos) c.pos = { x: W(d.x), z: d.z };
+  }
+  for (const [id, c] of cars) if (!seen.has(id)) c.gone = true;
+
+  updateBanner(data);
+  updateSonar(data.sonar);
+  $('fault').classList.toggle('hidden', !data.fault);
+  const cap = $('caption');
+  if (data.caption && data.caption.age < 4.5) {
+    const src = data.caption.src === 'gemini' ? 'GEMINI' : data.caption.src === 'system' ? 'SYSTEM' : 'HELMET';
+    cap.innerHTML = `<span class="src">${src}</span>`;
+    cap.appendChild(document.createTextNode(data.caption.text));
+    cap.classList.remove('hidden');
+  } else cap.classList.add('hidden');
+  $('scene').innerHTML = data.scene ? `<b>SIMULATOR</b> &middot; ${data.scene.replace(/[<&]/g, '')}` : '';
+
+  const son = Object.entries(data.sonar || {}).filter(([, v]) => v != null).map(([k, v]) => `${k} ${v.toFixed(2)} m`);
+  $('stats').textContent = [`${data.fps} fps`, data.det_ms ? `det ${data.det_ms} ms` : null,
+    `${data.cars.length} tracked`, /Arduino on/.test(data.serial) ? 'Arduino ✓' : 'no Arduino', ...son,
+    data.shaky ? 'head moving' : null].filter(Boolean).join(' · ');
+}
+
+function connect() {
+  const es = new EventSource('/state');
+  es.onmessage = (ev) => { try { onState(JSON.parse(ev.data)); } catch (e) { console.error(e); } };
+  es.onerror = () => {};                  // EventSource reconnects on its own ("retry: 1000")
+}
+connect();
+
+// ------------------------------------------------------------------ camera inset
+let camOn = !(window.innerWidth < 640 && window.innerHeight > window.innerWidth);
+function setCam(on) {
+  camOn = on;
+  $('cam').classList.toggle('hidden', !on);
+  $('camImg').src = on ? '/stream.mjpg' + (tok ? '?t=' + encodeURIComponent(tok) : '') : '';  // no stream = no Pi CPU
+  $('camBtn').textContent = on ? 'Hide camera' : 'Camera';
+}
+$('camBtn').addEventListener('click', () => setCam(!camOn));
+setCam(camOn);
+
+// ------------------------------------------------------------------ animation
+const clock = new THREE.Clock();
+function frame() {
+  requestAnimationFrame(frame);
+  const dt = Math.min(clock.getDelta(), 0.1);
+  const now = performance.now();
+  const blinkOn = ((now / 1000) * BLINK_HZ) % 1 < 0.5;
+  const k = 1 - Math.exp(-dt / 0.12);     // position smoothing between ~10 Hz updates
+
+  const connected = now - lastMsg < 1500;
+  $('status').classList.toggle('live', connected);
+  $('statusText').textContent = connected ? 'LIVE' : 'NO SIGNAL';
+  $('wait').classList.toggle('hidden', connected || last !== null && now - lastMsg < 4000);
+
+  for (const [id, c] of cars) {
+    const d = c.data;
+    c.fade = Math.min(1, Math.max(0, c.fade + (c.gone || !connected ? -dt / 0.4 : dt / 0.25)));
+    if (c.gone && c.fade <= 0) { disposeCar(c); cars.delete(id); continue; }
+    c.pos.x += (W(d.x) - c.pos.x) * k;
+    c.pos.z += (d.z - c.pos.z) * k;
+    // face where it's heading: toward its predicted meeting point with you
+    let yaw = 0;
+    if (d.path != null && c.pos.z > 2) yaw = Math.max(-0.45, Math.min(0.45, Math.atan2(-(W(d.path) - c.pos.x), c.pos.z)));
+    c.yaw += (yaw - c.yaw) * k;
+    c.group.position.set(c.pos.x, 0, c.pos.z);
+    c.group.rotation.y = c.yaw;
+    const tier = d.tier;
+    c.bodyMat.color.setHex(TIER_HEX[tier]);
+    for (const m of c.mats) m.opacity = c.fade;
+    c.glowMat.color.setHex(TIER_HEX[Math.max(tier, 1)]);
+    c.glowMat.opacity = c.fade * (tier >= 3 ? (blinkOn ? 0.95 : 0.35) : tier === 2 ? 0.6 : 0);
+    const text = tier >= 1 && d.ttc != null && !d.alongside ? `${d.ttc.toFixed(1)} s`
+      : d.alongside ? 'beside' : `${Math.round(d.z)} m`;
+    setLabel(c.label, text, tier);
+    c.label.material.opacity = c.fade;
+    const showPath = d.path != null && (d.on_path || tier >= 2) && !d.alongside && c.pos.z > 1.5;
+    c.ribbon.visible = showPath;
+    if (showPath) {
+      setRibbon(c.ribbon, c.pos.x, c.pos.z - 2.3, W(d.path), 0.6, 0.14);
+      c.ribbon.material.color.setHex(TIER_HEX[Math.max(tier, 2)]);
+      c.ribbon.material.opacity = 0.75 * c.fade;
+    }
+  }
+
+  // zones + screen edges: the OLED's state, blinking like the OLED for HIGH
+  const hud = (last && connected && !last.fault) ? last.hud : {};
+  const zoneOpacity = (t) => (t >= 3 ? (blinkOn ? 0.42 : 0.14) : t === 2 ? 0.24 : 0);
+  for (const name of ['LEFT', 'RIGHT']) {
+    const t = hud[name] || 0;
+    zones[name].fill.material.color.setHex(TIER_HEX[Math.max(t, 2)]);
+    zones[name].fill.material.opacity = zoneOpacity(t);
+    zones[name].outline.material.opacity = t ? 0.55 : 0.18;
+  }
+  const tc = hud.CENTER || 0;
+  laneMat.color.setHex(tc ? TIER_HEX[tc] : 0x3ea6ff);
+  laneMat.opacity = tc ? zoneOpacity(tc) * 0.8 + 0.05 : 0.07;
+  for (const [el, zone] of [[$('edgeL'), 'LEFT'], [$('edgeR'), 'RIGHT'], [$('edgeB'), 'CENTER']]) {
+    const t = hud[zone] || 0;
+    el.style.setProperty('--c', t >= 3 ? 'rgba(255,59,48,0.55)' : 'rgba(255,138,31,0.45)');
+    el.style.opacity = t >= 3 ? (blinkOn ? 1 : 0.35) : t === 2 ? 0.8 : 0;
+  }
+  const b = $('banner');
+  b.classList.toggle('dim', b.dataset.tier === '3' && !blinkOn);
+  halo.material.opacity = 0.28 + 0.07 * Math.sin(now / 600);
+
+  renderer.render(scene, camera);
+}
+frame();
+</script>
+</body>
+</html>

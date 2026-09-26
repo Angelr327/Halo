@@ -130,6 +130,17 @@ def test_shake_does_not_hide_real_threat():
     print("  approach under head shake: HIGH still fires")
 
 
+def test_car_filling_frame_stays_behind():
+    # Right behind you and close, the box spans the whole frame (both edges clipped).
+    # That used to read as LEFT/"alongside" because the left edge was checked first.
+    fires, log, _ = run(lambda t: (0.0, max(0.9, 20 - 10 * t), 0), 2.2)
+    late = [tr.zone for t, _, tr in log if t > 1.6]
+    print(f"  car filling the frame from behind: zones at the end {sorted(set(late))}, "
+          f"alerts {sorted({(f.tier, f.zone) for f in fires})}")
+    assert set(late) == {"CENTER"}
+    assert all(f.zone == "CENTER" for f in fires)
+
+
 def walk(X0, Z0=7.0, speed=1.4, X1=None, stop_z=0.0):
     """Person walking toward the camera at 1.4 m/s, lateral X0 -> X1 (m) by the time they arrive."""
     X1 = X0 if X1 is None else X1

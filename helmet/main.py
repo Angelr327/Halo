@@ -26,6 +26,7 @@ import cv2
 from . import config as cfg
 from .gemini_gateway import GeminiEvent, GeminiGateway, facts_for, prepare_frame, record_wav
 from .hud import Hud
+from . import snapshot
 from .outputs import HelmetLink, Speaker
 from .overlay import Overlay
 from .perception import CENTER, LEFT, RIGHT, GlobalMotion, Tracker, VehicleDetector, update_metrics
@@ -53,6 +54,7 @@ def parse_args():
     ap.add_argument("--port", help="Arduino serial port (default: auto-detect)")
     ap.add_argument("--no-gemini", action="store_true")
     ap.add_argument("--no-hud", action="store_true", help="don't drive the transparent OLED")
+    ap.add_argument("--sim", action="store_true", help="scripted traffic instead of the camera (no YOLO); web view on")
     ap.add_argument("--agent", action="store_true", help="Gemini tool-calling mode")
     ap.add_argument("--demo-person", action="store_true", help="count people as vehicles (stationary demo)")
     ap.add_argument("--model", help="YOLO weights, e.g. yolo26n.pt")
@@ -81,6 +83,8 @@ def apply_overrides(args):
         cfg.STREAM_PORT = args.stream or None
     if args.camera_source:
         cfg.CAMERA_SOURCE = args.camera_source
+    if args.sim and args.stream is None and not cfg.STREAM_PORT:
+        cfg.STREAM_PORT = 8080                  # the simulator is for the web view: always serve it
 
 
 def local_ip():
@@ -139,10 +143,15 @@ def main():
     load_dotenv()
     apply_overrides(args)
 
-    source = VideoSource(args.video, realtime=not args.no_realtime, loop=args.loop) if args.video \
-        else open_camera(args.camera)
-    print("Loading YOLO...")
-    detector = VehicleDetector()
+    if args.sim:
+        from .sim import SimDetector, SimSource
+        source = SimSource()
+        detector = SimDetector(source)
+    else:
+        source = VideoSource(args.video, realtime=not args.no_realtime, loop=args.loop) if args.video \
+            else open_camera(args.camera)
+        print("Loading YOLO...")
+        detector = VehicleDetector()
     motion, tracker, policy, scene = GlobalMotion(), Tracker(), AlertPolicy(), SceneTrigger()
     link, speaker, gateway, overlay = HelmetLink(args.port), Speaker(), GeminiGateway(), Overlay()
     hud = Hud(enabled=not args.no_hud)
@@ -153,7 +162,9 @@ def main():
           f"Serial: {link.status} | Gemini: {gateway.status if not gateway.available else cfg.GEMINI_MODEL}")
     print(f"HUD: {hud.status}")
     if streamer:
-        print(f"Web view: http://{local_ip()}:{cfg.STREAM_PORT}/" + (f"?t={cfg.STREAM_TOKEN}" if cfg.STREAM_TOKEN else ""))
+        tok = f"?t={cfg.STREAM_TOKEN}" if cfg.STREAM_TOKEN else ""
+        print(f"Web view: http://{local_ip()}:{cfg.STREAM_PORT}/{tok}")
+        print(f"2.5D view: http://{local_ip()}:{cfg.STREAM_PORT}/view{tok}")
     if headless and not streamer:
         print("Headless with no web view: status prints only. Ctrl+C to stop.")
 
@@ -250,6 +261,17 @@ def main():
         if not headless:
             cv2.imshow(cfg.WINDOW_NAME, canvas)
 
+    last_snap = [0.0]
+
+    def publish_snapshot(now, shaky=False):
+        if streamer is None or now - last_snap[0] < 0.06:         # every frame, at most ~15 per second
+            return
+        last_snap[0] = now
+        streamer.publish_state(snapshot.build(
+            tracker.tracks, st.t, hud_state=hud.state, fault=st.fault, shaky=shaky, light=st.light,
+            fps=st.fps, det_ms=detector.last_ms, link=link, profile=policy.profile_name,
+            captions=speaker.captions, scene=getattr(source, "title", None)))
+
     def poll_key():
         k = cv2.waitKey(1) & 0xFF if not headless else 255
         if k == 255 and streamer:
@@ -344,6 +366,7 @@ def main():
                 if st.fault:
                     st.light = 0                      # fail-visible: normal flashing bike light
                 hud.update([], fault=st.fault)
+                publish_snapshot(now)
                 link.tick(st.light if st.light_override is None else st.light_override)
                 apply_gemini()
                 if st.last_frame is not None:
@@ -379,6 +402,7 @@ def main():
                 execute_fire(f)
             st.light = policy.light_level(tracker.tracks, t)
             hud.update(tracker.tracks)
+            publish_snapshot(now, shaky)
 
             st.frames.append(frame)
             st.last_frame = frame

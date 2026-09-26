@@ -383,12 +383,13 @@ def update_metrics(tr, t, frame_w, vp_x, shaky, frame_h=None):
     clip_l = d.x1 <= cfg.EDGE_MARGIN_PX
     clip_r = d.x2 >= frame_w - cfg.EDGE_MARGIN_PX
     clip_v = frame_h is not None and (d.y1 <= cfg.EDGE_MARGIN_PX or d.y2 >= frame_h - cfg.EDGE_MARGIN_PX)
-    tr.alongside = clip_l or clip_r
+    # One side cut off = beside you. Both sides cut off = it fills the frame: right behind you.
+    tr.alongside = clip_l != clip_r
     width_m = cfg.CLASS_WIDTH_M.get(tr.label, 1.8)
 
     # ---- lateral offset / clearance / distance (frozen while side-clipped: box width is wrong)
     lat = None
-    if not tr.alongside and d.w >= cfg.MIN_BOX_W_PX:
+    if not (clip_l or clip_r) and d.w >= cfg.MIN_BOX_W_PX:
         lat = (d.cx - vp_x) / d.w * width_m
         tr.lat_m = lat if tr.lat_m is None else (1 - cfg.LAT_EMA_ALPHA) * tr.lat_m + cfg.LAT_EMA_ALPHA * lat
         tr.dist_m = focal_px(frame_w) * width_m / d.w
@@ -449,7 +450,9 @@ def update_metrics(tr, t, frame_w, vp_x, shaky, frame_h=None):
         tr.on_path = False
 
     # ---- zone with hysteresis (edge clipping is unambiguous and overrides)
-    if clip_l:
+    if clip_l and clip_r:
+        raw = tr.zone or CENTER                           # fills the frame: keep the side it came from
+    elif clip_l:
         raw = LEFT
     elif clip_r:
         raw = RIGHT
