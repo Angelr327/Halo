@@ -80,6 +80,40 @@ def test_sim_scenes_trigger_the_right_alerts():
         print(f"  {k}: {sorted({(tier, zone) for tier, zone, _ in v})}")
 
 
+def test_demo_person_sim_and_snapshot():
+    # --sim --demo-person: teammates walking/jogging, drawn as people in the view
+    sc, trk, pol = Scenario(seed=3, people=True), Tracker(), AlertPolicy()
+    per_scene, labels, t = {}, set(), 0.0
+    while True:
+        t += 1 / 15
+        title = sc.title()
+        dets = sc.boxes(sc.step(1 / 15))
+        if sc.title() != title and sc.idx == 0:
+            break
+        labels |= {d.label for d in dets}
+        trk.update(dets, t)
+        for tr in trk.tracks:
+            if tr.matched_now:
+                update_metrics(tr, t, W, W / 2, False, frame_h=H)
+        for f in pol.evaluate(trk.tracks, t, False):
+            per_scene.setdefault(sc.title(), []).append((f.tier, f.zone, f.reason))
+    got = lambda key: [x for k, v in per_scene.items() if key in k for x in v]
+    assert labels == {"person"}
+    assert any(t == 3 and z == "CENTER" for t, z, _ in got("jogging straight"))
+    assert got("walking past") and not any(t == 3 for t, _, _ in got("walking past"))   # README step 7
+    assert any(t == 3 and "cutting in" in r for t, _, r in got("cutting into"))
+    assert any(t == 3 and z == "RIGHT" for t, z, _ in got("brushing past"))
+    assert not got("standing still")
+    saved, cfg.DEMO_PERSON_AS_VEHICLE = cfg.DEMO_PERSON_AS_VEHICLE, True
+    try:
+        s = snapshot.build([_track(label="person")], 1.0, hud_state={})
+    finally:
+        cfg.DEMO_PERSON_AS_VEHICLE = saved
+    assert s["demo_person"] is True and s["cars"][0]["label"] == "person"
+    for k, v in per_scene.items():
+        print(f"  {k}: {sorted({(tier, zone) for tier, zone, _ in v})}")
+
+
 def test_endpoints():
     st = Streamer(PORT)
     try:

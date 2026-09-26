@@ -151,6 +151,10 @@ sensors draw arcs beside the bike. The camera button adds the live debug feed.
 - **No hardware?** `python -m helmet.main --sim` runs scripted traffic (car behind, normal left
   pass, car cutting in, close pass right, two cars, steady follower) through the real tracker,
   alerts, OLED and Arduino. Good for building the view and as a demo backup.
+- **`--demo-person`:** people are drawn as walking figures instead of cars, the banner says
+  "Person…", and a DEMO MODE badge shows. `--sim --demo-person` rehearses the stationary demo
+  with no hardware: teammates jogging at you, walking past on the 1.5 m line, cutting in,
+  brushing past, and standing still (which must stay quiet).
 - **Laptop:** add `--stream 8080` to any run (`--video clip.mp4 --stream 8080`).
 - Distance comes from one camera (±20-30%); side and time-to-contact are the reliable parts.
 

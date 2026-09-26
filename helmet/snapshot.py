@@ -66,4 +66,5 @@ def build(tracks, t, *, hud_state, fault=False, shaky=False, light=0, fps=0.0, d
         "caption": caption,
         "scene": scene,
         "corridor_half_m": cfg.RIDER_HALF_WIDTH_M + cfg.CORRIDOR_MARGIN_M,
+        "demo_person": bool(cfg.DEMO_PERSON_AS_VEHICLE),   # people stand in for vehicles (stationary demo)
     }

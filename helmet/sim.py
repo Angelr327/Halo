@@ -1,6 +1,7 @@
 """Traffic simulator: scripted cars through the REAL pipeline, no camera or YOLO needed.
 
-    python -m helmet.main --sim            # then open http://<ip>:8080/view
+    python -m helmet.main --sim                  # then open http://<ip>:8080/view
+    python -m helmet.main --sim --demo-person    # teammates walking/jogging at you instead of cars
 
 Each scene moves cars around the rider in metres. They are projected to boxes with the same
 pinhole model the perception code inverts, jittered like YOLO boxes, and handed to the real
@@ -22,10 +23,11 @@ W, H = cfg.CAPTURE_WIDTH, cfg.CAPTURE_HEIGHT
 FPS = 15.0
 CAM_HEIGHT_M = 1.5            # helmet camera height above the road
 CAR_W, CAR_H = 1.8, 1.45      # rear view of a car, metres
+PERSON_W, PERSON_H = 0.5, 1.75
 
 
 def _approach(x0, x1, z0, speed, until=0.6):
-    """Car closing at `speed` m/s from z0, drifting laterally x0 -> x1 by the time it arrives."""
+    """Road user closing at `speed` m/s from z0, drifting laterally x0 -> x1 by the time it arrives."""
     def pos(t):
         z = z0 - speed * t
         if z < until:
@@ -57,9 +59,27 @@ def _scenes():
     return s
 
 
+def _demo_scenes():
+    """The stationary demo: teammates walking and jogging at the rider (README calibration step 7)."""
+    s = []
+    p, d = _approach(0.0, 0.0, 10.0, 2.6, until=0.8)
+    s.append(("Teammate jogging straight at you", [p], d + 1.5))
+    p, d = _approach(-1.5, -1.5, 9.0, 1.4, until=0.8)
+    s.append(("Teammate walking past on your left (1.5 m)", [p], d + 1.5))
+    p, d = _approach(-2.2, 0.0, 9.0, 1.6, until=0.8)
+    s.append(("Teammate cutting into your path from the left", [p], d + 1.5))
+    p, d = _approach(0.95, 0.95, 9.0, 1.8, until=0.8)
+    s.append(("Teammate brushing past on your right", [p], d + 1.5))
+    p, _ = _hold(0.3, 4.0)
+    s.append(("Teammate standing still 4 m behind: no alert", [p], 5.0))
+    return s
+
+
 class Scenario:
-    def __init__(self, seed=7):
-        self.scenes = _scenes()
+    def __init__(self, seed=7, people=False):
+        self.people = people
+        self.scenes = _demo_scenes() if people else _scenes()
+        self.label, self.size = ("person", (PERSON_W, PERSON_H)) if people else ("car", (CAR_W, CAR_H))
         self.rng = random.Random(seed)
         self.idx, self.t_scene = 0, 0.0
 
@@ -77,20 +97,22 @@ class Scenario:
         return [p for p in (f(self.t_scene) for f in cars) if p is not None]
 
     def boxes(self, cars):
-        """Rider-view boxes (x right = rider's right), far cars first, YOLO-like jitter."""
+        """Rider-view boxes (x right = rider's right), far first, YOLO-like jitter."""
         f = focal_px(W)
+        size_w, size_h = self.size
+        wj = 0.04 if self.people else 0.02                     # arm swing makes a walker's width noisier
         out = []
         for x, z in sorted(cars, key=lambda c: -c[1]):
             # YOLO box jitter scales with box size: ~2% of width, ~1.5% of height per edge
-            w = f * CAR_W / z * (1 + self.rng.uniform(-0.02, 0.02))
-            h = f * CAR_H / z
+            w = f * size_w / z * (1 + self.rng.uniform(-wj, wj))
+            h = f * size_h / z
             cx = W / 2 + f * x / z + self.rng.uniform(-0.02, 0.02) * w
             y2 = H / 2 + f * CAM_HEIGHT_M / z + self.rng.uniform(-0.015, 0.015) * h
-            y1 = H / 2 + f * (CAM_HEIGHT_M - CAR_H) / z + self.rng.uniform(-0.015, 0.015) * h
+            y1 = H / 2 + f * (CAM_HEIGHT_M - size_h) / z + self.rng.uniform(-0.015, 0.015) * h
             x1, x2 = max(0.0, cx - w / 2), min(W - 1.0, cx + w / 2)
             y1, y2 = max(0.0, y1), min(H - 1.0, y2)
             if x2 - x1 >= 4 and y2 > y1:
-                out.append(Detection(x1, y1, x2, y2, 0.9, "car"))
+                out.append(Detection(x1, y1, x2, y2, 0.9, self.label))
         return out
 
 
@@ -102,8 +124,13 @@ def render(dets, title):
     vp = (W // 2, H // 2)
     for x_edge in (-6.0, 6.0):
         cv2.line(img, vp, (int(W / 2 + focal_px(W) * x_edge / 2.0), H), (150, 150, 150), 2)
-    for d in dets:                                             # far first, so near cars cover them
+    for d in dets:                                             # far first, so near ones cover them
         x1, y1, x2, y2 = int(d.x1), int(d.y1), int(d.x2), int(d.y2)
+        if d.label == "person":
+            bw = x2 - x1
+            cv2.rectangle(img, (x1 + bw // 5, y1 + bw // 2), (x2 - bw // 5, y2), (190, 170, 150), -1)
+            cv2.circle(img, ((x1 + x2) // 2, y1 + bw // 4), max(2, bw // 4), (160, 190, 220), -1)
+            continue
         cv2.rectangle(img, (x1, y1), (x2, y2), (205, 205, 210), -1)
         wh = max(1, (y2 - y1) // 3)
         cv2.rectangle(img, (x1 + (x2 - x1) // 6, y1 + wh // 4), (x2 - (x2 - x1) // 6, y1 + wh), (60, 50, 45), -1)
@@ -120,7 +147,7 @@ class SimSource:
     is_live = False
 
     def __init__(self, seed=7):
-        self.scenario = Scenario(seed)
+        self.scenario = Scenario(seed, people=cfg.DEMO_PERSON_AS_VEHICLE)
         self.current = []                  # rider-view detections for the latest frame
         self.paused, self.ended = False, False
         self.t, self._last = 0.0, None
