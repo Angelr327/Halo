@@ -61,14 +61,24 @@ LAT_EMA_ALPHA = 0.3               # smoothing of lateral offset
 MIN_GROWTH_RATIO = 1.06           # late-half mean area / early-half mean area
 MIN_CONSISTENCY = 0.60            # fraction of frame-to-frame area increases in the buffer
 TTC_CAP_S = 30.0
+TTC_AGE_MAX_S = 1.0               # box clipped on a side AND top/bottom: count the last TTC down this long, then drop it
 
 # ---------------------------------------------------------------- zones
 ZONE_METHOD = "lateral"           # "lateral" (distance-invariant) or "thirds" (simple fallback)
-RIDER_CORRIDOR_HALF_M = 0.5       # a vehicle whose body comes within this of your centerline is "behind"
-RIDER_HALF_WIDTH_M = 0.3
+RIDER_HALF_WIDTH_M = 0.35         # half of rider + handlebars (bars are ~0.6-0.7 m wide)
+CORRIDOR_MARGIN_M = 0.25          # extra room each side of the bike. Your lane ("behind" zone) is
+                                  # 2 * (RIDER_HALF_WIDTH_M + CORRIDOR_MARGIN_M) = 1.2 m wide
 CLOSE_PASS_M = 1.0                # clearance under ~3 ft counts as "cutting close"
+CLASS_CLOSE_PASS_M = {"person": 0.4}   # people pass at arm's length all the time; brush past to trigger
 EDGE_MARGIN_PX = 4                # box touching frame edge -> vehicle is alongside
 ZONE_CONFIRM_FRAMES = 3
+PATH_HORIZON_S = 2.5              # predict lateral position this far ahead (or TTC, if sooner)
+MIN_PATH_SAMPLES = 6              # lateral samples needed before trusting a lateral velocity
+PATH_MIN_SIGNIFICANCE = 3.0       # sideways drift must be this many standard errors from zero, else "no drift"
+
+# Overlay only (the corridor band drawn on the image; zone logic doesn't use these)
+CAMERA_HEIGHT_M = 1.6             # lens height above the ground: ~1.6 on a helmet, ~0.8 for a table demo
+HORIZON_FRAC = 0.5                # horizon row / image height (0.5 = camera level)
 
 # ---------------------------------------------------------------- camera shake
 GLOBAL_MOTION = True

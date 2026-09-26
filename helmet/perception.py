@@ -10,6 +10,11 @@ Key ideas
 - Lateral offset in metres = (box_cx - straight_behind_x) / box_w * real_width.
   That ratio does not depend on distance, so a far car in the next lane is already
   "left" instead of looking centred until it's close.
+- A box cut off by the frame edge stops growing on that axis, which would read as
+  "slowing down". Growth is measured on the axis that isn't cut off: width when the
+  top or bottom is clipped (a close person's feet leave the frame), height when a side is.
+- Trajectory: a linear fit of lateral offset over time, extended to the moment of
+  contact, says whether a vehicle will END UP in your lane, not just whether it is there now.
 """
 import math
 import os
@@ -202,6 +207,8 @@ class Sample:
     h: float
     clip_l: bool
     clip_r: bool
+    clip_v: bool = False       # top or bottom edge cut off by the frame
+    lat: float = None          # raw lateral offset (m), when measurable
 
 
 @dataclass
@@ -224,8 +231,14 @@ class Track:
     growth_pct_s: float = 0.0
     ttc: float = math.inf
     ttc_valid_t: float = -1.0
+    ttc_meas_t: float = -1.0   # last time TTC came from a real measurement (not aging)
+    scale_axis: str = "-"      # which box size TTC used: "area", "w" or "h"
     lat_m: float = None
+    lat_v: float = None        # lateral velocity, m/s (+ = moving to your right)
+    pred_lat_m: float = None   # lateral offset extrapolated to the moment of contact
+    on_path: bool = False      # predicted to end up inside your corridor
     clearance_m: float = None
+    pred_clearance_m: float = None
     dist_m: float = None
     zone: str = None
     zone_pending: str = None
@@ -234,7 +247,8 @@ class Track:
     approaching: bool = False
     was_approaching: bool = False  # ever approached (so a parked car we pass isn't 'in the blind spot')
     # alert state (owned by risk.AlertPolicy)
-    tier: int = 0
+    tier: int = 0              # raw tier this frame
+    shown_tier: int = 0        # tier after frame confirmation (what the overlay colours)
     cand_tier: int = 0
     cand_count: int = 0
     fired_tier: int = 0
@@ -324,42 +338,84 @@ def focal_px(width):
     return (width / 2) / math.tan(math.radians(cfg.HFOV_DEG) / 2)
 
 
-def update_metrics(tr, t, frame_w, vp_x, shaky):
+def corridor_half_m():
+    """Half-width of your lane: the bike plus a margin on each side."""
+    return cfg.RIDER_HALF_WIDTH_M + cfg.CORRIDOR_MARGIN_M
+
+
+def _scale_series(hist, label):
+    """Box size on an axis the frame edge didn't cut off, chosen once for the whole window
+    so early and late halves are comparable. Returns (values, axis, power), value ~ 1/Z^power."""
+    side = any(s.clip_l or s.clip_r for s in hist)
+    vert = any(s.clip_v for s in hist)
+    if side and vert:
+        return None, "-", 0
+    if vert:
+        return [s.w for s in hist], "w", 1
+    if side or label == "person":          # a walking person's width swings with their arms
+        return [s.h for s in hist], "h", 1
+    return [s.area for s in hist], "area", 2
+
+
+def _lateral_fit(hist, t):
+    """Least-squares line through recent lateral offsets -> (offset now, velocity m/s)."""
+    if not hist or hist[-1].lat is None:
+        return None, None
+    pts = [(s.t, s.lat) for s in hist if s.lat is not None]
+    if len(pts) < cfg.MIN_PATH_SAMPLES or pts[-1][0] - pts[0][0] < 0.4:
+        return None, None
+    n = len(pts)
+    mt = sum(p[0] for p in pts) / n
+    ml = sum(p[1] for p in pts) / n
+    stt = sum((p[0] - mt) ** 2 for p in pts)
+    v = sum((p[0] - mt) * (p[1] - ml) for p in pts) / stt
+    # Far boxes are small, so their lateral offset is noisy; projected 2.5 s ahead that noise
+    # looks like a lane change. Only trust a drift that stands out from the scatter.
+    resid = sum((l - (ml + v * (tt - mt))) ** 2 for tt, l in pts) / (n - 2)
+    if abs(v) < cfg.PATH_MIN_SIGNIFICANCE * math.sqrt(resid / stt):
+        v = 0.0
+    return ml + v * (t - mt), v
+
+
+def update_metrics(tr, t, frame_w, vp_x, shaky, frame_h=None):
     """Append a sample for a matched track and recompute its smoothed metrics."""
     d = tr.det
     clip_l = d.x1 <= cfg.EDGE_MARGIN_PX
     clip_r = d.x2 >= frame_w - cfg.EDGE_MARGIN_PX
-    tr.hist.append(Sample(t, d.area, d.cx, d.cy, d.w, d.h, clip_l, clip_r))
+    clip_v = frame_h is not None and (d.y1 <= cfg.EDGE_MARGIN_PX or d.y2 >= frame_h - cfg.EDGE_MARGIN_PX)
     tr.alongside = clip_l or clip_r
     width_m = cfg.CLASS_WIDTH_M.get(tr.label, 1.8)
 
-    # ---- lateral offset / clearance / distance (frozen while clipped: box width is wrong)
+    # ---- lateral offset / clearance / distance (frozen while side-clipped: box width is wrong)
+    lat = None
     if not tr.alongside and d.w >= cfg.MIN_BOX_W_PX:
         lat = (d.cx - vp_x) / d.w * width_m
         tr.lat_m = lat if tr.lat_m is None else (1 - cfg.LAT_EMA_ALPHA) * tr.lat_m + cfg.LAT_EMA_ALPHA * lat
         tr.dist_m = focal_px(frame_w) * width_m / d.w
     if tr.lat_m is not None:
         tr.clearance_m = abs(tr.lat_m) - width_m / 2 - cfg.RIDER_HALF_WIDTH_M
+    tr.hist.append(Sample(t, d.area, d.cx, d.cy, d.w, d.h, clip_l, clip_r, clip_v, lat))
 
     # ---- growth / consistency / TTC from early-half vs late-half means
     n = len(tr.hist)
     tr.ready = n >= cfg.MIN_HISTORY_FOR_TTC and d.w >= cfg.MIN_BOX_W_PX
-    late_clipped = any(s.clip_l or s.clip_r for s in list(tr.hist)[n // 2:])
-    if tr.ready and not late_clipped:
+    vals, axis, power = _scale_series(tr.hist, tr.label) if tr.ready else (None, "-", 0)
+    if vals is not None:
         hist = list(tr.hist)
         half = n // 2
-        early, late = hist[:half], hist[n - half:]
-        # Average log-area (geometric mean): area grows ~quadratically near the end, and an
+        # Average log-size (geometric mean): size grows fastest near the end, and an
         # arithmetic mean would be dominated by the last few samples and skew the timing.
-        la_e = sum(math.log(max(s.area, 1.0)) for s in early) / half
-        la_l = sum(math.log(max(s.area, 1.0)) for s in late) / half
-        t_e = sum(s.t for s in early) / half
-        t_l = sum(s.t for s in late) / half
-        tr.growth = math.exp(la_l - la_e)                  # late-half vs early-half size ratio
-        ups = sum(1 for a, b in zip(hist, hist[1:]) if b.area > a.area)
+        ls_e = sum(math.log(max(v, 1.0)) for v in vals[:half]) / half
+        ls_l = sum(math.log(max(v, 1.0)) for v in vals[n - half:]) / half
+        t_e = sum(s.t for s in hist[:half]) / half
+        t_l = sum(s.t for s in hist[n - half:]) / half
+        la = (2 / power) * (ls_l - ls_e)                   # as a log AREA ratio, whatever the axis,
+        tr.growth = math.exp(la)                           # so MIN_GROWTH_RATIO means the same thing
+        ups = sum(1 for a, b in zip(vals, vals[1:]) if b > a)
         tr.consistency = ups / (n - 1)
+        tr.scale_axis = axis
         if tr.growth > 1.0 and t_l > t_e:
-            k = (la_l - la_e) / (t_l - t_e)                # d ln(A)/dt;  TTC = 2A/(dA/dt) = 2/k
+            k = la / (t_l - t_e)                           # d ln(A)/dt;  TTC = 2A/(dA/dt) = 2/k
             tr.growth_pct_s = (math.exp(k) - 1) * 100
             # A secant between the two half-centres estimates TTC at their MIDPOINT;
             # subtract the time since then so the number means "seconds from now".
@@ -368,13 +424,29 @@ def update_metrics(tr, t, frame_w, vp_x, shaky):
         else:
             tr.growth_pct_s = 0.0 if tr.growth <= 1.0 else tr.growth_pct_s
             tr.ttc = math.inf
-        tr.ttc_valid_t = t
-    elif tr.alongside and math.isfinite(tr.ttc) and tr.ttc_valid_t > 0:
-        tr.ttc = max(0.0, tr.ttc - (t - tr.ttc_valid_t))   # age the last good estimate
-        tr.ttc_valid_t = t
+        tr.ttc_valid_t = tr.ttc_meas_t = t
+    elif tr.ready:
+        # Clipped on a side AND top/bottom (very close): nothing to measure. Count the last
+        # real estimate down briefly, then give up rather than let it reach 0 on its own.
+        tr.scale_axis = "-"
+        if math.isfinite(tr.ttc) and tr.ttc_meas_t > 0 and t - tr.ttc_meas_t <= cfg.TTC_AGE_MAX_S:
+            tr.ttc = max(0.0, tr.ttc - (t - tr.ttc_valid_t))
+            tr.ttc_valid_t = t
+        else:
+            tr.ttc = math.inf
     tr.approaching = (tr.ready and tr.growth >= cfg.MIN_GROWTH_RATIO
                       and tr.consistency >= cfg.MIN_CONSISTENCY and math.isfinite(tr.ttc))
     tr.was_approaching = tr.was_approaching or tr.approaching
+
+    # ---- trajectory: where will it be, sideways, when it reaches you?
+    lat_now, tr.lat_v = _lateral_fit(tr.hist, t)
+    if lat_now is not None and tr.approaching:
+        tr.pred_lat_m = lat_now + tr.lat_v * min(tr.ttc, cfg.PATH_HORIZON_S)
+        tr.pred_clearance_m = abs(tr.pred_lat_m) - width_m / 2 - cfg.RIDER_HALF_WIDTH_M
+        tr.on_path = abs(tr.pred_lat_m) - width_m / 2 < corridor_half_m()
+    else:
+        tr.pred_lat_m = tr.pred_clearance_m = None
+        tr.on_path = False
 
     # ---- zone with hysteresis (edge clipping is unambiguous and overrides)
     if clip_l:
@@ -385,7 +457,7 @@ def update_metrics(tr, t, frame_w, vp_x, shaky):
         frac = d.cx / frame_w
         raw = LEFT if frac < 1 / 3 else RIGHT if frac > 2 / 3 else CENTER
     else:
-        raw = CENTER if abs(tr.lat_m) - width_m / 2 < cfg.RIDER_CORRIDOR_HALF_M else (LEFT if tr.lat_m < 0 else RIGHT)
+        raw = CENTER if abs(tr.lat_m) - width_m / 2 < corridor_half_m() else (LEFT if tr.lat_m < 0 else RIGHT)
 
     if tr.zone is None or tr.alongside:
         tr.zone, tr.zone_pending, tr.zone_count = raw, None, 0

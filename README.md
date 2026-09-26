@@ -120,8 +120,17 @@ give a long buzz.
 
 Tune by watching numbers, not by guessing. Every metric is in the side panel:
 `grow` (late/early size ratio), `cons` (fraction of frames that grew), `TTC`, `dist`,
-`lat` (lateral offset, − = your left), `clr` (passing clearance), zone, tier and the reason.
+`lat` (lateral offset, − = your left), `->` (predicted `lat` when it reaches you, `PATH` = heading
+into your lane), `clr` (passing clearance), `[area|h|w]` (which box size TTC used), zone, tier and
+the reason. A tier in brackets `(raw HIGH)` is what this frame says; the box only turns that colour
+once it holds for `CONFIRM_FRAMES`, which is also when an alert actually fires.
 Run with `--demo-person --no-gemini --log calib.csv`, edit `helmet/config.py`, press **c**.
+
+**Your lane.** The shaded band is the "behind" corridor: bike half-width `RIDER_HALF_WIDTH_M` plus
+`CORRIDOR_MARGIN_M` each side (1.2 m total by default). The band is drawn in perspective from
+`CAMERA_HEIGHT_M`, so set that for your setup (helmet ≈ 1.6, table demo ≈ 0.8). The exact test is the
+short cyan bar across each box's top: it is your lane at that object's distance, and a box that
+overlaps it is zone `CENTER`. The arrow on a box points to where it will be sideways at contact.
 
 **Setup.** Tape marks on the floor behind the helmet at 2, 4, 6, 8, 10 m on a centre line,
 plus a parallel line 1.5 m to the left and right. Helmet at head height (≈1.6 m), camera
@@ -137,7 +146,8 @@ level and pointing straight back.
 3. **TTC accuracy.** Teammate walks from 10 m straight at the camera at a steady pace
    while someone films the screen. TTC should count down about 1 s per second and
    reach ~0 at the helmet. Reading consistently high = lag: shorten `HISTORY_LEN`.
-   Jumpy = lengthen it.
+   Jumpy = lengthen it. Inside ~3.5 m the feet leave the frame and `[area]`/`[h]` switches to `[w]`
+   (width); TTC should keep counting down through that switch.
 4. **Lateral.** Stand on the 1.5 m side line at 3, 6 and 9 m. `lat` should read
    about ±1.5 m at every distance (it is distance-independent). If it's biased, the camera
    is yawed; if it's scaled, fix `CLASS_WIDTH_M` for that class.
@@ -148,7 +158,9 @@ level and pointing straight back.
    not flip. Raise `SHAKE_GATE_FRAC` if normal riding posture keeps triggering SHAKY.
 7. **Tiers.** Jog at the camera from 10 m: HIGH (red, both motors, strobe, "Person behind!")
    should fire around 2-3 s out. Walk past on the left line: MED left, not HIGH. Walk past
-   0.7 m to the left: HIGH left ("close pass").
+   0.95 m to the left: HIGH left ("close pass"; 0.7 m is inside the lane, so it's HIGH "behind").
+   Start 2 m left and walk diagonally into the centre line: HIGH "cutting in" before you reach it.
+   Walk in and stand still half out of frame at the edge: MED "alongside" at most, never HIGH.
 8. **Real traffic.** Run each recorded clip with `--video clip.mp4 --log clipN.csv`
    (without `--demo-person`). Tally per clip: passes detected, correct side, false alerts,
    missed HIGHs. These are your pitch numbers.

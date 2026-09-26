@@ -158,7 +158,7 @@ def main():
     if log:
         log.writerow(["t", "id", "label", "conf", "x1", "y1", "x2", "y2", "area", "growth", "consistency",
                       "ttc", "lat_m", "clearance_m", "dist_m", "zone", "alongside", "tier", "reason",
-                      "shaky", "gdx", "gdy", "vp_offset"])
+                      "shaky", "gdx", "gdy", "vp_offset", "scale_axis", "lat_v", "pred_lat_m", "on_path"])
 
     if not headless:
         cv2.namedWindow(cfg.WINDOW_NAME, cv2.WINDOW_NORMAL)
@@ -368,7 +368,7 @@ def main():
             vp = motion.vp_x(w)
             for tr in tracker.tracks:
                 if tr.matched_now:
-                    update_metrics(tr, t, w, vp, shaky)
+                    update_metrics(tr, t, w, vp, shaky, frame_h=h)
 
             for f in policy.evaluate(tracker.tracks, t, shaky):
                 execute_fire(f)
@@ -394,7 +394,8 @@ def main():
                                       int(d.y2), int(d.area), f"{tr.growth:.3f}", f"{tr.consistency:.2f}",
                                       f"{tr.ttc:.2f}" if math.isfinite(tr.ttc) else "", tr.lat_m, tr.clearance_m,
                                       tr.dist_m, tr.zone, int(tr.alongside), tr.tier, tr.reason, int(shaky),
-                                      f"{motion.dx:.1f}", f"{motion.dy:.1f}", f"{motion.vp_offset:.0f}"])
+                                      f"{motion.dx:.1f}", f"{motion.dy:.1f}", f"{motion.vp_offset:.0f}",
+                                      tr.scale_axis, tr.lat_v, tr.pred_lat_m, int(tr.on_path)])
 
             show(frame)
             running = handle_key(poll_key())
