@@ -7,3 +7,9 @@ rec_*.mp4
 *_ncnn_model/
 check_*.jpg
 orientation_check.jpg
+.DS_Store
+xcuserdata/
+*.xcuserstate
+DerivedData/
+.build/
+.swiftpm/
