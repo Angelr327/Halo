@@ -25,6 +25,7 @@ import cv2
 
 from . import config as cfg
 from .gemini_gateway import GeminiEvent, GeminiGateway, facts_for, prepare_frame, record_wav
+from .hud import Hud
 from .outputs import HelmetLink, Speaker
 from .overlay import Overlay
 from .perception import CENTER, LEFT, RIGHT, GlobalMotion, Tracker, VehicleDetector, update_metrics
@@ -51,6 +52,7 @@ def parse_args():
     ap.add_argument("--camera", type=int, default=None, help="camera index")
     ap.add_argument("--port", help="Arduino serial port (default: auto-detect)")
     ap.add_argument("--no-gemini", action="store_true")
+    ap.add_argument("--no-hud", action="store_true", help="don't drive the transparent OLED")
     ap.add_argument("--agent", action="store_true", help="Gemini tool-calling mode")
     ap.add_argument("--demo-person", action="store_true", help="count people as vehicles (stationary demo)")
     ap.add_argument("--model", help="YOLO weights, e.g. yolo26n.pt")
@@ -143,11 +145,13 @@ def main():
     detector = VehicleDetector()
     motion, tracker, policy, scene = GlobalMotion(), Tracker(), AlertPolicy(), SceneTrigger()
     link, speaker, gateway, overlay = HelmetLink(args.port), Speaker(), GeminiGateway(), Overlay()
+    hud = Hud(enabled=not args.no_hud)
     st = State()
     headless = cfg.HEADLESS
     streamer = Streamer(cfg.STREAM_PORT) if cfg.STREAM_PORT else None
     print(f"Detector: {detector.model_name} @ {cfg.IMGSZ} | Camera: {type(source).__name__} | "
           f"Serial: {link.status} | Gemini: {gateway.status if not gateway.available else cfg.GEMINI_MODEL}")
+    print(f"HUD: {hud.status}")
     if streamer:
         print(f"Web view: http://{local_ip()}:{cfg.STREAM_PORT}/" + (f"?t={cfg.STREAM_TOKEN}" if cfg.STREAM_TOKEN else ""))
     if headless and not streamer:
@@ -238,7 +242,7 @@ def main():
             "fps": st.fps, "det_ms": detector.last_ms, "age_ms": st.age_ms, "link": link,
             "policy": policy, "gateway": gateway, "speaker": speaker, "light": st.light,
             "fault": st.fault, "shaky": motion.shaky(st.t), "recording": st.writer is not None,
-            "paused": getattr(source, "paused", False), "scene_note": st.scene_note})
+            "paused": getattr(source, "paused", False), "scene_note": st.scene_note, "hud": hud.preview})
         if st.writer is not None:
             st.writer.write(cv2.resize(canvas, st.writer_size))
         if streamer:
@@ -339,6 +343,7 @@ def main():
                     set_fault(True)
                 if st.fault:
                     st.light = 0                      # fail-visible: normal flashing bike light
+                hud.update([], fault=st.fault)
                 link.tick(st.light if st.light_override is None else st.light_override)
                 apply_gemini()
                 if st.last_frame is not None:
@@ -373,6 +378,7 @@ def main():
             for f in policy.evaluate(tracker.tracks, t, shaky):
                 execute_fire(f)
             st.light = policy.light_level(tracker.tracks, t)
+            hud.update(tracker.tracks)
 
             st.frames.append(frame)
             st.last_frame = frame
@@ -412,6 +418,7 @@ def main():
         if log_file:
             log_file.close()
         link.close()
+        hud.close()
         source.release()
         if not headless:
             cv2.destroyAllWindows()

@@ -144,6 +144,19 @@ SERIAL_PORT = None                # None = auto-detect, or "COM5" / "/dev/cu.usb
 SERIAL_BAUD = 57600               # must match the sketch
 HEARTBEAT_S = 0.25
 
+# ---------------------------------------------------------------- transparent OLED HUD
+HUD_ENABLED = True                # [restart] big directional arrows for MED/HIGH threats
+HUD_DRIVER = "ssd1309"            # [restart] 1.51" transparent OLED (Waveshare); "ssd1306" for common 0.96" modules
+HUD_INTERFACE = "spi"             # [restart] "spi" (Waveshare default) or "i2c"
+HUD_GPIO_DC = 25                  # [restart] SPI only: DC and RST pins (BCM numbers)
+HUD_GPIO_RST = 27
+HUD_I2C_ADDRESS = 0x3C            # [restart] I2C only
+HUD_ROTATE_180 = True             # panel mounted upside down
+HUD_MIRROR = False                # True if the rider reads it through the back of the glass
+HUD_MIN_TIER = 2                  # 2 = show MED and HIGH, 3 = HIGH only
+HUD_HOLD_S = 0.8                  # keep an arrow up this long after the threat clears (no flicker)
+HUD_BLINK_HZ = 4.0                # HIGH blinks filled/outline at this rate
+
 # ---------------------------------------------------------------- speech
 TTS_ENABLED = True
 TTS_RATE = 200                    # words per minute (macOS/Linux); Windows maps to SAPI rate

@@ -100,6 +100,16 @@ class Overlay:
             cv2.circle(img, (x, 28), 18, (0, 0, 255) if on else (60, 60, 60), -1)
             _text(img, side, (x - 6, 34), 0.6, (255, 255, 255), 2)
 
+        # ---- HUD preview: exactly what the rider sees on the transparent OLED
+        hud = c.get("hud")
+        if hud is not None:
+            hx, hy = 8, 54
+            cv2.rectangle(img, (hx - 2, hy - 2), (hx + hud.shape[1] + 1, hy + hud.shape[0] + 1), (90, 90, 90), 1)
+            roi = img[hy:hy + hud.shape[0], hx:hx + hud.shape[1]]
+            roi[:] = roi // 3
+            roi[hud > 0] = (255, 220, 120)
+            _text(img, "HUD", (hx, hy + hud.shape[0] + 14), 0.4, (170, 170, 170))
+
         # ---- rear light indicator
         lvl = c["light"]
         blink_hz = {0: 1.0, 1: 2.5, 2: 5.0}[lvl]

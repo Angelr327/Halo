@@ -107,6 +107,33 @@ S-V-G header) or a mini breadboard. Everything runs from the laptop's USB (< 400
 Bare coin motors (no module) need an NPN transistor or logic-level MOSFET plus a flyback
 diode each. Never drive a motor straight from a pin.
 
+## Transparent OLED HUD (Pi)
+
+Big arrows in the rider's peripheral vision for MED/HIGH threats: an arrow on the threat's side
+(outline = MED, filled and blinking = HIGH), chevrons for "behind", an X when the camera is down,
+and nothing at all (fully transparent) when it's clear. The debug overlay shows the same picture
+top-left, labelled HUD, so you can check it without looking at the panel.
+
+Wiring for the 1.51" transparent OLED (SSD1309, SPI by default) to the Pi's 40-pin header:
+
+| OLED | Pi pin | | OLED | Pi pin |
+|---|---|---|---|---|
+| VCC | 3.3V (pin 1) | | CS | GPIO8 / CE0 (pin 24) |
+| GND | GND (pin 6) | | DC | GPIO25 (pin 22) |
+| DIN | GPIO10 / MOSI (pin 19) | | RST | GPIO27 (pin 13) |
+| CLK | GPIO11 / SCLK (pin 23) | | | |
+
+Enable SPI once (`sudo raspi-config nonint do_spi 0`, reboot). On a Pi 5, luma needs
+`pip install rpi-lgpio` for the DC/RST pins (the old RPi.GPIO doesn't support the Pi 5).
+The startup line `HUD:` says whether the panel was found; if not, it runs preview-only and
+everything else is unaffected. Using I2C instead (resistor change on the back of some boards):
+wire SDA/SCL to pins 3/5 and set `HUD_INTERFACE = "i2c"`.
+
+Orientation: arrows are drawn from the rider's view. `HUD_ROTATE_180 = True` is for a panel
+mounted upside down. If the rider sees arrows pointing the wrong way, it's usually because they
+read the glass from the back: set `HUD_MIRROR = True`. Check with a teammate on your LEFT: the
+arrow must point to your left.
+
 ## Serial protocol (57600 baud, newline-terminated)
 
 `L<n>` `R<n>` `B<n>` haptics (0 stop, 1 gentle, 2 medium, 3 strong, 4 fault) ·
