@@ -2,6 +2,7 @@ ultralytics>=8.4          # YOLOv8 / YOLO11 / YOLO26 weights, same result.boxes 
 opencv-python>=4.9
 numpy
 pyserial>=3.5
+ncnn; platform_machine == "aarch64"   # runtime for the NCNN detector on a Pi (else Ultralytics installs it mid-run)
 google-genai>=2.20        # tested with 2.25; uses client.models.generate_content
 sounddevice               # optional: push-to-talk voice questions (key V)
 comtypes; platform_system == "Windows"   # Windows speech (SAPI)
