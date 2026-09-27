@@ -103,6 +103,7 @@ def build(tracks, t, *, hud_state, fault=False, shaky=False, light=0, fps=0.0, d
         "caption": caption,
         "scene": scene,
         "corridor_half_m": cfg.RIDER_HALF_WIDTH_M + cfg.CORRIDOR_MARGIN_M,
+        "view_range_m": {"behind": cfg.VIEW_BEHIND_M, "ahead": cfg.VIEW_AHEAD_M},
         "demo_person": bool(cfg.DEMO_PERSON_AS_VEHICLE),   # people stand in for vehicles (stationary demo)
         "sonar_mount": {k: {"zone": z, "yaw": y, "offset": cfg.SONAR_OFFSET_M} for k, (z, y) in cfg.SONAR_MOUNT.items()},
         "incidents": incidents or {"latest": None, "recording": False},   # app refreshes its list when latest changes

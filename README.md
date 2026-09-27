@@ -219,10 +219,14 @@ orange column. `--sim` and `--sim --demo-person` include hand-off scenes with si
 
 ## 2.5D view (phone or laptop)
 
-Open **`http://<pi-ip>:8080/view`** (the startup line prints it). It's a 3D rear-view mirror:
-your bike in front, the road behind you, and every tracked car placed where the pipeline
-measured it, tinted by alert tier (grey tracked, yellow approaching, orange blind spot, red
-danger). The blind-spot zones and screen edges light up from the **same state the OLED shows**,
+Open **`http://<pi-ip>:8080/view`** (the startup line prints it). It's a chase view, like a
+car's driver-assist display: your bike heads up the screen (north), objects the front camera
+sees (`--collision`) are ahead of it, and rear traffic comes up from the bottom (south). Every
+tracked object is placed where the pipeline measured it, tinted by alert tier (grey tracked,
+yellow approaching, orange blind spot, red danger). Only the last **12 m behind and 8 m ahead**
+are drawn (`VIEW_BEHIND_M` / `VIEW_AHEAD_M` in `config.py`): one camera's distance is too rough
+beyond that. Farther objects are hidden unless they're alerting, and those are pinned at the
+edge with their time to contact. The blind-spot zones and screen edges light up from the **same state the OLED shows**,
 with the same arrows and the same 4 Hz blink for HIGH, so the phone, OLED and buzz always agree.
 Cars show their time-to-contact, a cutting-in car shows its predicted path, and the ultrasonic
 sensors draw arcs beside the bike. Labeled **Front camera** and **Rear camera** previews sit in

@@ -216,4 +216,8 @@ STREAM_PORT = 8080 if IS_PI else None   # overlay + control buttons at http://<p
 STREAM_FPS = 8                    # web view refresh; costs CPU, keep it low on a Pi
 STREAM_JPEG_QUALITY = 70
 STREAM_TOKEN = ""                 # set a word to require http://<pi-ip>:8080/?t=<word> for the buttons
+VIEW_BEHIND_M = 12.0              # 2.5D view: draw rear traffic this far back (one camera's distance is too
+VIEW_AHEAD_M = 8.0                # rough beyond it) and front-camera objects this far ahead. Farther objects
+                                  # are hidden unless alerting; alerting ones are pinned at the edge with
+                                  # their time to contact. Bigger = more road, smaller models
 STATUS_PRINT_S = 2.0              # console status line when running headless
