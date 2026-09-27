@@ -601,7 +601,7 @@ function updateBanner(data) {
       if (collision.z != null) bits.push(`~${collision.z.toFixed(1)} m ahead`);
       if (collision.speed_mps != null) bits.push(`closing ~${collision.speed_mps.toFixed(1)} m/s`);
       $('bSub').textContent = bits.length ? bits.join(' · ')
-        : collision.reason === 'BRAKE HOLD' ? 'Out of the camera\u2019s view now · holding the warning'
+        : collision.reason === 'BRAKE HOLD' ? "Out of the camera's view now · holding the warning"
         : collision.state === 'INITIALIZING' ? 'Starting the front camera' : 'Front camera unavailable';
     } else {
       $('bTitle').textContent = collision.state === 'BRAKE' ? 'BRAKE  BRAKE' : collision.state === 'CAUTION' ? 'Obstacle ahead' : collision.reason;
@@ -682,7 +682,7 @@ function onState(data) {
   } else cap.classList.add('hidden');
   const lines = [];
   if (data.collision) lines.push(data.collision.mode === 'camera-only'
-    ? '<b>FRONT</b> &middot; camera-only, no calibration &middot; chairs shown as trees &middot; look where you&rsquo;re going'
+    ? "<b>FRONT</b> &middot; camera-only, no calibration &middot; chairs shown as trees &middot; look where you're going"
     : '<b>FRONT DEMO</b> &middot; detected chair shown as tree &middot; straight approach, look ahead');
   if (data.demo_person) lines.push('<b>DEMO MODE</b> &middot; people stand in for cars');
   if (data.scene) lines.push(`<b>SIMULATOR</b> &middot; ${data.scene.replace(/[<&]/g, '')}`);
