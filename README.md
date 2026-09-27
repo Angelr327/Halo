@@ -2,11 +2,12 @@ Created by: Sion King
 
 # Blind-spot helmet
 
-**Forward collision demo:** both helmet cameras can run together with calibrated,
-marker-assisted chair ranging and a **BRAKE / BRAKE** OLED warning. Start with the
-[setup, calibration, replay, and validation guide](docs/COLLISION_DEMO.md).
-This is a stationary-target, straight-approach hackathon demo; rear-only operation
-continues to use the commands below.
+**Forward BRAKE warning:** `--collision` runs both helmet cameras. The front one uses the same
+box-growth time-to-contact as the rear, so it needs **no calibration**, and shows **BRAKE** on
+the OLED when something ahead is 2.8 s away. The 3D view draws front and rear together. See the
+[guide, test cases and roadmap](docs/FRONT_CAMERA_ONLY.md); `--sim --collision` rehearses it
+with no hardware. The earlier marker-ranged chair mode (exact metres, needs calibration) is in
+[COLLISION_DEMO.md](docs/COLLISION_DEMO.md). Rear-only operation continues to use the commands below.
 
 Rear-facing camera → local YOLO detection → directional haptics, a rear light that warns the
 driver, and short spoken alerts. Gemini adds language on top, asynchronously, and is never
@@ -85,6 +86,8 @@ python -m helmet.main --agent                  # Gemini tool calling
 python -m helmet.main --log run.csv            # per-frame metrics for calibration
 python -m helmet.main --model yolo26n.pt       # swap detector
 python -m helmet.main --sim                    # scripted traffic, no camera/YOLO; open http://<ip>:8080/view
+python -m helmet.main --collision              # add the front camera: BRAKE warning, no calibration
+python -m helmet.main --sim --collision        # both cameras scripted: front + rear in one 3D view
 ```
 
 | Key | Action | Key | Action |

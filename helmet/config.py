@@ -45,12 +45,16 @@ DEVICE = "cpu"                    # [restart] "mps" on Apple Silicon
 VEHICLE_CLASSES = {1: "bicycle", 2: "car", 3: "motorcycle", 5: "bus", 7: "truck"}   # COCO ids
 DEMO_PERSON_AS_VEHICLE = False    # True for the stationary demo: walking teammates count as "vehicles"
 DUPLICATE_IOU = 0.6               # same object labelled car AND truck -> keep the more confident box
+FRONT_CLASSES = {0: "person", 1: "bicycle", 2: "car", 3: "motorcycle", 5: "bus", 7: "truck", 56: "chair"}
+                                  # camera-only front warning (--collision without a calibration file)
 
-# Typical rear-view widths (m). Used for lateral offset and rough distance.
-CLASS_WIDTH_M = {"car": 1.8, "truck": 2.5, "bus": 2.55, "motorcycle": 0.8, "bicycle": 0.6, "person": 0.5}
+# Typical widths seen end-on (m). Used for lateral offset and rough distance.
+CLASS_WIDTH_M = {"car": 1.8, "truck": 2.5, "bus": 2.55, "motorcycle": 0.8, "bicycle": 0.6, "person": 0.5,
+                 "chair": 0.5}
 
 # Camera geometry (only affects the distance readout, not TTC or zones)
-HFOV_DEG = 64.0                   # C920 at 640x480 is roughly 60-70 deg; calibrate FOCAL_PX instead if you can
+HFOV_DEG = 53.5 if IS_PI else 64.0   # Pi: ov5647 Camera Module (640x480 mode is full width, ~53.5 deg).
+                                  # C920 at 640x480 is roughly 60-70 deg; calibrate FOCAL_PX instead if you can
 FOCAL_PX = None                   # set from calibration step 5: box_width_px * distance_m / real_width_m
 
 # ---------------------------------------------------------------- tracker

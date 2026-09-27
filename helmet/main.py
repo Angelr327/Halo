@@ -53,8 +53,10 @@ def parse_args():
     ap.add_argument("--no-realtime", action="store_true", help="process every video frame (slower than real time)")
     ap.add_argument("--loop", action="store_true", help="loop the video")
     ap.add_argument("--camera", type=int, default=None, help="camera index")
-    ap.add_argument("--collision", action="store_true", help="enable calibrated helmet-front chair collision demo")
-    ap.add_argument("--collision-calibration", help="measured front camera/marker/alignment JSON (tools.calibrate_front)")
+    ap.add_argument("--collision", action="store_true",
+                    help="front camera BRAKE warning: camera-only by default, marker mode with --collision-calibration")
+    ap.add_argument("--collision-calibration", help="marker mode: measured front camera/marker/alignment JSON "
+                                                    "(tools.calibrate_front); omit for camera-only")
     ap.add_argument("--collision-log", help="write forward measurements and decisions as JSON lines")
     ap.add_argument("--front-camera", type=int, default=cfg.FRONT_CAMERA_INDEX,
                     help="front camera index for the web preview and collision mode")
@@ -73,14 +75,16 @@ def parse_args():
     ap.add_argument("--stream", type=int, default=None, help="web view port (0 = off; default 8080 on a Pi)")
     ap.add_argument("--camera-source", choices=["auto", "usb", "picamera2"], help="camera type")
     args = ap.parse_args()
+    if args.collision_calibration and not args.collision:
+        ap.error("--collision-calibration requires --collision")
     if args.collision:
-        if not args.collision_calibration:
-            ap.error("--collision requires --collision-calibration")
-        if args.sim:
-            ap.error("--collision uses live cameras or paired videos, not the rear-only --sim")
-        if bool(args.video) != bool(args.front_video):
+        if args.sim and args.collision_calibration:
+            ap.error("marker mode needs real marker images; use --sim --collision without a calibration")
+        if args.sim and (args.video or args.front_video):
+            ap.error("--sim scripts both cameras; don't pass videos")
+        if not args.sim and bool(args.video) != bool(args.front_video):
             ap.error("collision replay requires both --video and --front-video")
-        if not args.video and args.front_camera == (cfg.CAMERA_INDEX if args.camera is None else args.camera):
+        if not (args.video or args.sim) and args.front_camera == (cfg.CAMERA_INDEX if args.camera is None else args.camera):
             ap.error("front and rear camera indices must differ")
     elif args.front_video:
         ap.error("--front-video requires --collision")
@@ -165,7 +169,7 @@ def main():
     args = parse_args()
     load_dotenv()
     apply_overrides(args)
-    if args.collision:
+    if args.collision_calibration:
         from .collision import Calibration
         Calibration.load(args.collision_calibration)  # fail before opening hardware
 
@@ -191,7 +195,11 @@ def main():
             hud.close()
             link.close()
             raise
-        print("Front collision demo: stationary marked chair, straight approach, look ahead")
+        if forward.mode == "marker":
+            print("Front collision demo: stationary marked chair, straight approach, look ahead")
+        else:
+            print("Front warning: camera-only (no calibration): BRAKE when an object ahead is "
+                  f"{forward.settings.brake_ttc_s:.1f} s from contact")
     fusion = SonarFusion()
     recorder = IncidentRecorder(client=gateway.client)
     st = State()
