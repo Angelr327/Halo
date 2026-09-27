@@ -145,12 +145,16 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x0b0e13);
 scene.fog = new THREE.Fog(0x0b0e13, 34, 62);
 const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 200);
+let forwardView = false;
 
 function placeCamera() {
   const w = window.innerWidth, h = window.innerHeight;
   renderer.setSize(w, h, false);
   camera.aspect = w / h;
-  if (camera.aspect < 0.8) {             // phone, portrait: higher, to fit the road width
+  if (forwardView) {
+    camera.fov = camera.aspect < 0.8 ? 65 : 55;
+    camera.position.set(0, 19, -19); camera.lookAt(0, 0, 0);
+  } else if (camera.aspect < 0.8) {             // phone, portrait: higher, to fit the road width
     camera.fov = 60; camera.position.set(0, 11.5, -9.5); camera.lookAt(0, 0, 7.5);
   } else {                               // laptop / landscape
     camera.fov = 46; camera.position.set(0, 7.2, -8.2); camera.lookAt(0, 0, 6.5);
@@ -210,7 +214,7 @@ function cylinder(a, b, r, mat) {                         // a rod between two p
 
 // ------------------------------------------------------------------ road
 flat(80, 100, new THREE.MeshStandardMaterial({ color: 0x0f1319, roughness: 1 }), 0, 20, 0);
-flat(ROAD_HALF * 2, 90, new THREE.MeshStandardMaterial({ color: 0x1a2029, roughness: 0.95 }), 0, 30, 0.002);
+flat(ROAD_HALF * 2, 110, new THREE.MeshStandardMaterial({ color: 0x1a2029, roughness: 0.95 }), 0, 20, 0.002);
 const edgeMat = new THREE.MeshBasicMaterial({ color: 0x3a4452 });
 for (const x of [-ROAD_HALF, ROAD_HALF]) flat(0.08, 90, edgeMat, x, 30, 0.006);
 const ringMat = new THREE.MeshBasicMaterial({ color: 0x2a323d });
@@ -446,12 +450,24 @@ function makeUnknown() {
   return { kind: 'unknown', group, bodyMat, mats, glowMat, label, ribbon: makeRibbon(), pos: null, yaw: 0, fade: 0,
     gone: false, data: null };
 }
-const kindOf = (d) => (d.label === 'person' ? 'person' : d.label === 'unknown' ? 'unknown' : 'car');
-const makeActor = (d) => ({ person: makePerson, unknown: makeUnknown, car: makeCar }[kindOf(d)])();
+const TREE_TRUNK = new THREE.CylinderGeometry(0.10, 0.14, 1.0, 10).translate(0, 0.5, 0);
+const TREE_CROWN = new THREE.ConeGeometry(0.65, 1.6, 12).translate(0, 1.6, 0);
+function makeTree() {
+  const c = makeUnknown();
+  const oldBody = c.group.children.find((m) => m.geometry === UNKNOWN_GEO);
+  c.group.remove(oldBody);
+  const trunk = new THREE.MeshStandardMaterial({ color: 0x805331, transparent: true });
+  c.group.add(new THREE.Mesh(TREE_TRUNK, trunk), new THREE.Mesh(TREE_CROWN, c.bodyMat));
+  c.mats.push(trunk); c.kind = 'tree'; c.label.position.y = 2.7;
+  return c;
+}
+const kindOf = (d) => d.source === 'front' && d.display_asset === 'tree' ? 'tree'
+  : (d.label === 'person' ? 'person' : d.label === 'unknown' ? 'unknown' : 'car');
+const makeActor = (d) => ({ tree: makeTree, person: makePerson, unknown: makeUnknown, car: makeCar }[kindOf(d)])();
 // How far behind the rider an actor's centre must stay when it is in line with the bike,
 // so the model never sits on top of the rider: [half width, min distance] in metres.
-const FOOTPRINT = { car: [0.9, 2.7], person: [0.25, 1.1], unknown: [0.3, 0.6] };
-const NOSE = { car: 2.3, person: 0.3, unknown: 0.3 };             // centre -> front, where the path strip starts
+const FOOTPRINT = { car: [0.9, 2.7], person: [0.25, 1.1], unknown: [0.3, 0.6], tree: [0.3, 0] };
+const NOSE = { car: 2.3, person: 0.3, unknown: 0.3, tree: 0.3 };             // centre -> front, where the path strip starts
 
 function disposeCar(c) {
   scene.remove(c.group); scene.remove(c.ribbon);
@@ -523,6 +539,18 @@ function describe(car) {
   return { title, sub: bits.join(' · '), zone: car.zone };
 }
 function updateBanner(data) {
+  const collision = data.collision;
+  if (collision && collision.state !== 'CLEAR') {
+    const b = $('banner');
+    $('bTitle').textContent = collision.state === 'BRAKE' ? 'BRAKE  BRAKE' : collision.state === 'CAUTION' ? 'Obstacle ahead' : collision.reason;
+    $('bSub').textContent = collision.valid
+      ? `${collision.distance_m.toFixed(2)} m gap · estimated approach ${collision.speed_mps.toFixed(2)} m/s · brake boundary ${collision.warning_distance_m.toFixed(2)} m`
+      : 'Forward estimate unavailable · stationary-chair demo';
+    $('arrow').innerHTML = ''; bannerKey = '';
+    b.dataset.tier = collision.state === 'BRAKE' ? '3' : '2';
+    b.style.setProperty('--c', TIER_CSS[b.dataset.tier]);
+    b.classList.remove('hidden'); return;
+  }
   const threats = data.cars.filter((c) => c.live && c.tier >= 2).sort((a, b) => b.tier - a.tier || a.z - b.z);
   const hudTier = Math.max(0, ...Object.values(data.hud));
   const b = $('banner');
@@ -548,11 +576,12 @@ const cars = new Map();
 let last = null, lastMsg = 0, fps = 0;
 function onState(data) {
   last = data; lastMsg = performance.now();
+  if (Boolean(data.collision) !== forwardView) { forwardView = Boolean(data.collision); placeCamera(); }
   setCorridor(data.corridor_half_m);
   sonarMount = data.sonar_mount || {};
   for (const [k, arc] of Object.entries(sonarArcs)) if (!(data.sonar && k in data.sonar)) arc.mesh.visible = false;
   const seen = new Set();
-  for (const d of data.cars) {
+  for (const d of [...data.cars, ...(data.front_obstacles || [])]) {
     seen.add(d.id);
     let c = cars.get(d.id);
     if (c && c.kind !== kindOf(d)) { disposeCar(c); c = null; }       // tracker changed its mind on the class
@@ -578,6 +607,7 @@ function onState(data) {
     cap.classList.remove('hidden');
   } else cap.classList.add('hidden');
   const lines = [];
+  if (data.collision) lines.push('<b>FRONT DEMO</b> &middot; detected chair shown as tree &middot; straight approach, look ahead');
   if (data.demo_person) lines.push('<b>DEMO MODE</b> &middot; people stand in for cars');
   if (data.scene) lines.push(`<b>SIMULATOR</b> &middot; ${data.scene.replace(/[<&]/g, '')}`);
   $('scene').innerHTML = lines.join('<br>');
@@ -626,7 +656,7 @@ function frame() {
     if (c.gone && c.fade <= 0) { disposeCar(c); cars.delete(id); continue; }
     const [halfW, minZ] = FOOTPRINT[c.kind];
     const inLine = Math.abs(d.x) < halfW + 0.4;          // overlaps the bike sideways
-    const zt = inLine ? Math.max(d.z, minZ) : d.z;
+    const zt = d.source === 'front' ? d.z : inLine ? Math.max(d.z, minZ) : d.z;
     c.pos.x += (W(d.x) - c.pos.x) * k;
     c.pos.z += (zt - c.pos.z) * k;
     if (c.kind === 'person') {                           // swing legs and arms at walking pace
@@ -643,11 +673,11 @@ function frame() {
     c.group.position.set(c.pos.x, 0, c.pos.z);
     c.group.rotation.y = c.yaw;
     const tier = d.tier;
-    c.bodyMat.color.setHex(TIER_HEX[tier]);
+    c.bodyMat.color.setHex(c.kind === 'tree' && tier === 0 ? 0x4f9c66 : TIER_HEX[tier]);
     for (const m of c.mats) m.opacity = c.fade;
     c.glowMat.color.setHex(TIER_HEX[Math.max(tier, 1)]);
     c.glowMat.opacity = c.fade * (tier >= 3 ? (blinkOn ? 0.95 : 0.35) : tier === 2 ? 0.6 : 0);
-    const text = d.measured != null ? `${d.measured.toFixed(2)} m gap`     // side sensor: a real measurement
+    const text = d.source === 'front' ? `chair · ${Math.abs(d.z).toFixed(1)} m ahead` : d.measured != null ? `${d.measured.toFixed(2)} m gap`     // side sensor: a real measurement
       : tier >= 1 && d.ttc != null && !d.alongside ? `${d.ttc.toFixed(1)} s`
       : d.alongside ? 'beside' : `${Math.round(d.z)} m`;
     setLabel(c.label, text, tier);
@@ -679,7 +709,9 @@ function frame() {
     el.style.opacity = t >= 3 ? (blinkOn ? 1 : 0.35) : t === 2 ? 0.8 : 0;
   }
   const b = $('banner');
-  b.classList.toggle('dim', b.dataset.tier === '3' && !blinkOn);
+  const bannerBlink = last?.collision?.state === 'BRAKE' ? ((now / 1000) * 2) % 1 < 0.5 : blinkOn;
+  b.classList.toggle('dim', b.dataset.tier === '3' && !bannerBlink);
+  if (!connected) b.classList.add('hidden');
   halo.material.opacity = 0.28 + 0.07 * Math.sin(now / 600);
 
   renderer.render(scene, camera);

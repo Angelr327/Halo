@@ -23,7 +23,7 @@ IS_PI = _is_raspberry_pi()        # Pi-friendly defaults below switch on automat
 CAMERA_SOURCE = "auto"            # [restart] "auto" (Pi camera if present, else USB) | "usb" | "picamera2"
 CAMERA_INDEX = 0                  # [restart] which camera is the REAR one: Pi camera number (0/1 = CSI port) or USB index
 CAMERA_ROTATE_180 = True          # [restart] rear camera mounted upside down (cable routed down the back of the helmet)
-FRONT_CAMERA_INDEX = 1            # [restart] front camera (riding conditions): the other CSI port
+FRONT_CAMERA_INDEX = 1            # [restart] helmet-front camera (--collision): the other CSI port
 FRONT_CAMERA_ROTATE_180 = False   # [restart] front camera is mounted the normal way up
 CAPTURE_WIDTH = 640               # [restart]
 CAPTURE_HEIGHT = 480              # [restart]

@@ -21,7 +21,7 @@ def _r(v, nd=2):
 
 
 def build(tracks, t, *, hud_state, fault=False, shaky=False, light=0, fps=0.0, det_ms=0.0,
-          link=None, profile="", captions=(), scene=None, contacts=()):
+          link=None, profile="", captions=(), scene=None, contacts=(), collision=None):
     cars = []
     for tr in tracks:
         if tr.lat_m is None or tr.dist_m is None:
@@ -68,9 +68,19 @@ def build(tracks, t, *, hud_state, fault=False, shaky=False, light=0, fps=0.0, d
         age = time.monotonic() - ts
         if age < 6.0:
             caption = {"text": text, "src": src, "age": round(age, 1)}
+    front = []
+    if collision and collision.get("valid") and collision.get("x") is not None and collision.get("z") is not None:
+        front.append({"id": collision["target_id"], "source": "front", "label": "chair",
+                      "detected_label": "chair", "display_asset": "tree", "x": _r(collision["x"]),
+                      "z": _r(-collision["z"]),  # shared world: positive behind, negative ahead
+                      "tier": {"BRAKE": 3, "CAUTION": 2}.get(collision["state"], 0),
+                      "live": True, "ttc": _r(collision.get("ttc_s")), "on_path": collision["on_path"],
+                      "path": None, "alongside": False, "reason": collision["reason"]})
     return {
         "t": round(t, 3),
         "cars": cars,
+        "front_obstacles": front,
+        "collision": dict(collision) if collision else None,
         "hud": dict(hud_state),                          # exactly what the OLED is showing
         "fault": bool(fault),
         "shaky": bool(shaky),

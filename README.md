@@ -2,6 +2,12 @@ Created by: Sion King
 
 # Blind-spot helmet
 
+**Forward collision demo:** both helmet cameras can run together with calibrated,
+marker-assisted chair ranging and a **BRAKE / BRAKE** OLED warning. Start with the
+[setup, calibration, replay, and validation guide](docs/COLLISION_DEMO.md).
+This is a stationary-target, straight-approach hackathon demo; rear-only operation
+continues to use the commands below.
+
 Rear-facing camera → local YOLO detection → directional haptics, a rear light that warns the
 driver, and short spoken alerts. Gemini adds language on top, asynchronously, and is never
 in the safety path.

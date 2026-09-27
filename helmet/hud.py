@@ -40,14 +40,18 @@ def threat_state(tracks):
     return state
 
 
-def render(state, fault=False, blink_on=True):
+def render(state, fault=False, blink_on=True, collision=None, brake_on=True):
     """Rider-view frame: uint8 (64, 128), 255 = lit pixel."""
     img = np.zeros((H, W), np.uint8)
+    if collision and collision.get("state") == "BRAKE":
+        # Two readable lines; emphasis pulses but the instruction never disappears.
+        for y in (27, 57):
+            cv2.putText(img, "BRAKE", (6, y), cv2.FONT_HERSHEY_SIMPLEX, 1.05, 255, 2 if brake_on else 1)
+        return img
     if fault:
         cv2.line(img, (44, 12), (84, 52), 255, 5)          # big X = rear camera offline
         cv2.line(img, (84, 12), (44, 52), 255, 5)
-        return img
-    for zone, shapes in ((LEFT, [_LEFT_ARROW]), (RIGHT, [_RIGHT_ARROW]), (CENTER, _CHEVRONS)):
+    for zone, shapes in (() if fault else ((LEFT, [_LEFT_ARROW]), (RIGHT, [_RIGHT_ARROW]), (CENTER, _CHEVRONS))):
         tier = state.get(zone, 0)
         if tier < cfg.HUD_MIN_TIER:
             continue
@@ -56,6 +60,11 @@ def render(state, fault=False, blink_on=True):
                 cv2.fillPoly(img, [poly], 255)
             else:
                 cv2.polylines(img, [poly], True, 255, 2)
+    if collision and collision.get("state") in ("INITIALIZING", "UNAVAILABLE"):
+        reason = collision.get("reason", "")
+        label = "LOOK AHEAD" if reason == "LOOK AHEAD" else "FRONT WAIT" if collision["state"] == "INITIALIZING" else "FRONT LOST"
+        img[:13] = 0
+        cv2.putText(img, label, (4, 10), cv2.FONT_HERSHEY_SIMPLEX, 0.42, 255, 1)
     return img
 
 
@@ -88,7 +97,11 @@ class Hud:
         self.preview = render({})                           # rider view, for the debug overlay
         self._state, self._fault = {}, False
         self._held = {}                                     # zone -> (tier, until)
+        self._lock = threading.RLock()
+        self._rear_updated = time.monotonic()
+        self._collision, self._collision_updated = None, 0.0
         self._running = False
+        self._thread = None
         if not (enabled and cfg.HUD_ENABLED):
             return
         try:
@@ -101,12 +114,40 @@ class Hud:
             self.status = f"preview only: {type(e).__name__}: {e}"[:90] + hint
         self._running = True
         self._wake = threading.Event()
-        threading.Thread(target=self._loop, daemon=True).start()
+        self._thread = threading.Thread(target=self._loop, daemon=True)
+        self._thread.start()
 
     @property
     def state(self):
         """What the panel is showing now: {zone: tier}, after the hold."""
-        return dict(self._state)
+        with self._lock:
+            now = time.monotonic()
+            return {z: tier for z, (tier, until) in self._held.items() if now < until} if now - self._rear_updated <= 0.8 else {}
+
+    @property
+    def collision(self):
+        with self._lock:
+            if self._collision is None:
+                return None
+            result = dict(self._collision)
+            elapsed = time.monotonic() - self._collision_updated
+        if elapsed > 0.8:
+            result.update(state="UNAVAILABLE", reason="FRONT PROCESSING STALE", valid=False,
+                          alignment_valid=False, speed_mps=None, distance_m=None, ttc_s=None,
+                          warning_distance_m=None, x=None, z=None, on_path=False)
+        if result.get("measurement_age_s") is not None:
+            result["measurement_age_s"] += elapsed
+        return result
+
+    def update_collision(self, result):
+        """Independent forward producer; a rear-camera stall cannot suppress BRAKE."""
+        with self._lock:
+            self._collision = dict(result)
+            self._collision_updated = time.monotonic()
+        if self._running:
+            self._wake.set()
+        else:
+            self.preview = render(self.state, self._fault, collision=self.collision)
 
     def update(self, tracks, fault=False, extra=None):
         """Called once per frame from the main loop. Cheap: no drawing, no I/O.
@@ -115,13 +156,17 @@ class Hud:
         state = threat_state(tracks)
         for zone, tier in (extra or {}).items():
             state[zone] = max(state.get(zone, 0), tier)
-        for zone, tier in state.items():
-            old, until = self._held.get(zone, (0, 0.0))
-            self._held[zone] = (max(tier, old if now < until else 0), now + cfg.HUD_HOLD_S)
-        self._state = {z: tier for z, (tier, until) in self._held.items() if now < until}
-        self._fault = fault
+        with self._lock:
+            for zone, tier in state.items():
+                old, until = self._held.get(zone, (0, 0.0))
+                self._held[zone] = (max(tier, old if now < until else 0), now + cfg.HUD_HOLD_S)
+            self._state = {z: tier for z, (tier, until) in self._held.items() if now < until}
+            self._fault = fault
+            self._rear_updated = now
         if self._running:
             self._wake.set()
+        else:
+            self.preview = render(self.state, self._fault, collision=self.collision)
 
     def _loop(self):
         shown = None
@@ -129,7 +174,12 @@ class Hud:
             self._wake.wait(timeout=0.05)                   # also wakes itself to animate blinking
             self._wake.clear()
             blink_on = (time.monotonic() * cfg.HUD_BLINK_HZ) % 1.0 < 0.5
-            img = render(self._state, self._fault, blink_on)
+            now = time.monotonic()
+            with self._lock:
+                rear_stale = now - self._rear_updated > 0.8
+                state = {} if rear_stale else {z: tier for z, (tier, until) in self._held.items() if now < until}
+                fault = self._fault or rear_stale
+            img = render(state, fault, blink_on, self.collision, (now * 2) % 1 < 0.5)
             self.preview = img
             if self.device is not None and (shown is None or not np.array_equal(img, shown)):
                 try:
@@ -142,6 +192,9 @@ class Hud:
 
     def close(self):
         self._running = False
+        if self._thread is not None:
+            self._wake.set()
+            self._thread.join(timeout=0.5)
         if self.device is not None:
             try:
                 self.device.clear()

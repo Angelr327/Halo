@@ -27,6 +27,7 @@ PY
 python -m tests.test_synthetic
 python -m tests.test_gateway
 python -m tests.test_headless
+python -m tests.test_collision
 
 echo
 echo "Done. Reboot once (SPI/I2C + group changes), then:"
