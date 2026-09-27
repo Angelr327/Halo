@@ -7,6 +7,7 @@ and only while someone is watching, so it barely touches the detection loop.
   /            debug overlay + buttons
   /view        2.5D bird's-eye view (three.js, drawn on the phone from /state)
   /state       snapshot feed: server-sent events, one small JSON scene per frame (<= ~15/s)
+  /api/v1/state  the latest snapshot as one plain JSON response (the iOS app polls this)
   /static/...  files for /view (three.js is bundled: works on a hotspot with no internet)
 """
 import json
@@ -103,6 +104,20 @@ class Streamer:
                 elif url.path.startswith("/static/"):
                     name = os.path.basename(url.path)            # no ../ tricks: flat folder only
                     self._file(os.path.join(WEB_DIR, "static", name), cache=True)
+                elif url.path == "/api/v1/state":
+                    data = streamer._state
+                    if data is None:                     # app running but no frame processed yet
+                        self.send_response(503)
+                        self.end_headers()
+                        return
+                    body = data.encode()
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.send_header("Cache-Control", "no-cache")
+                    self.send_header("Access-Control-Allow-Origin", "*")
+                    self.end_headers()
+                    self.wfile.write(body)
                 elif url.path == "/state":
                     self.send_response(200)
                     self.send_header("Content-Type", "text/event-stream")
