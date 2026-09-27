@@ -222,11 +222,20 @@ measured it, tinted by alert tier (grey tracked, yellow approaching, orange blin
 danger). The blind-spot zones and screen edges light up from the **same state the OLED shows**,
 with the same arrows and the same 4 Hz blink for HIGH, so the phone, OLED and buzz always agree.
 Cars show their time-to-contact, a cutting-in car shows its predicted path, and the ultrasonic
-sensors draw arcs beside the bike. The camera button adds the live debug feed.
+sensors draw arcs beside the bike. Labeled **Front camera** and **Rear camera** previews sit in
+the bottom-right corner. **Hide cameras / Show cameras** toggles both feeds. The rear preview
+uses the same rotation and mirror settings as detection; the front uses its own rotation setting.
+The full debug overlay is still at `/`.
+
+Live runs (including `--demo-person`) open the front camera only while its preview is watched;
+choose it with `--front-camera` (default `FRONT_CAMERA_INDEX`). Collision mode reuses its existing
+front capture. Missing or busy cameras show **Camera unavailable**; simulation and rear-only
+video replay show **No front feed in this run**. Camera previews are available separately at
+`/stream.mjpg?camera=front` and `/stream.mjpg?camera=rear` (append `&t=...` if using `STREAM_TOKEN`).
 
 - **How:** the Pi sends a ~700-byte JSON snapshot per frame over `/state` (server-sent events);
   the phone draws the scene with three.js, which is bundled, so it works on a hotspot with no
-  internet. No video is sent for the view itself.
+  internet. Video is sent only while the camera previews or debug feed are watched.
 - **No hardware?** `python -m helmet.main --sim` runs scripted traffic (car behind, normal left
   pass, car cutting in, close pass right, two cars, steady follower) through the real tracker,
   alerts, OLED and Arduino. Good for building the view and as a demo backup.

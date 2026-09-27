@@ -33,7 +33,7 @@ from .outputs import HelmetLink, Speaker
 from .overlay import Overlay
 from .perception import CENTER, LEFT, RIGHT, GlobalMotion, Tracker, VehicleDetector, update_metrics
 from .risk import SPOKEN_LABEL, AlertPolicy, SceneTrigger
-from .sources import RecoveringCamera, VideoSource, open_camera
+from .sources import CameraPreview, RecoveringCamera, VideoSource, open_camera
 from .streamer import Streamer
 
 
@@ -56,7 +56,8 @@ def parse_args():
     ap.add_argument("--collision", action="store_true", help="enable calibrated helmet-front chair collision demo")
     ap.add_argument("--collision-calibration", help="measured front camera/marker/alignment JSON (tools.calibrate_front)")
     ap.add_argument("--collision-log", help="write forward measurements and decisions as JSON lines")
-    ap.add_argument("--front-camera", type=int, default=cfg.FRONT_CAMERA_INDEX)
+    ap.add_argument("--front-camera", type=int, default=cfg.FRONT_CAMERA_INDEX,
+                    help="front camera index for the web preview and collision mode")
     ap.add_argument("--front-video", help="synchronized front clip; requires --video rear clip")
     ap.add_argument("--replay-timestamps", help="paired host capture timestamps from tools.record_pair")
     ap.add_argument("--port", help="Arduino serial port (default: auto-detect)")
@@ -196,8 +197,20 @@ def main():
     st = State()
     headless = cfg.HEADLESS
     streamer = Streamer(cfg.STREAM_PORT) if cfg.STREAM_PORT else None
+    front_camera_preview = None
     if streamer:
         streamer.incidents = recorder
+        if forward is None:
+            rear_index = cfg.CAMERA_INDEX if args.camera is None else args.camera
+            if args.sim or args.video:
+                streamer.publish_camera("front", None, unavailable="No front feed in this run")
+            elif args.front_camera == rear_index:
+                streamer.publish_camera("front", None, unavailable="Choose a different front camera")
+            else:
+                front_camera_preview = CameraPreview(
+                    args.front_camera, cfg.FRONT_CAMERA_ROTATE_180,
+                    wanted=lambda: streamer.wants_frames("front"),
+                    publish=lambda frame: streamer.publish_camera("front", frame))
     print(f"Detector: {detector.model_name} @ {cfg.IMGSZ} | Camera: {type(source).__name__} | "
           f"Serial: {link.status} | Gemini: {gateway.status if not gateway.available else cfg.GEMINI_MODEL}")
     print(f"HUD: {hud.status}")
@@ -400,6 +413,9 @@ def main():
         while running:
             frame, t = (None, None) if st.sim_fault else source.read(timeout=0.1)
             now = time.monotonic()
+            if streamer and forward is not None:
+                front_frame, captured_at = forward.camera_frame()
+                streamer.publish_camera("front", front_frame, captured_at=captured_at if source.is_live else now)
 
             for item in [s for s in st.scheduled if s[0] <= now]:
                 st.scheduled.remove(item)
@@ -417,6 +433,10 @@ def main():
                     break
                 if source.is_live and (st.sim_fault or source.stale_for() > cfg.CAMERA_TIMEOUT_S) and not st.fault:
                     set_fault(True)
+                if streamer and st.fault:
+                    streamer.publish_camera("rear", None)
+                elif streamer and not source.is_live and st.last_frame is not None:
+                    streamer.publish_camera("rear", st.last_frame)  # keep a paused replay visible
                 if st.fault:
                     st.light = 0                      # fail-visible: normal flashing bike light
                 # A front-only replay event (or pause) must not advance the
@@ -444,6 +464,8 @@ def main():
                 set_fault(False)
             if cfg.MIRROR_VIEW and not getattr(source, "frames_are_mirrored", False):
                 frame = cv2.flip(frame, 1)
+            if streamer:
+                streamer.publish_camera("rear", frame)
             st.t = t
             st.age_ms = (now - t) * 1000 if source.is_live else 0.0
             dt_loop = now - st.last_loop
@@ -507,6 +529,8 @@ def main():
     except KeyboardInterrupt:
         pass
     finally:
+        if front_camera_preview:
+            front_camera_preview.close()
         if streamer:
             streamer.close()
         if st.writer is not None:

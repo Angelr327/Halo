@@ -31,6 +31,7 @@ class ForwardEngine:
         self.last_input_t = None
         self.latest = dict(self.policy.result)
         self.frame = None
+        self.frame_received_at = 0.0
         self.log = open(log_path, "w", encoding="utf-8") if log_path else None
         if self.log:
             self.log.write(json.dumps({"type": "session", "calibration": calibration.to_dict(),
@@ -71,6 +72,7 @@ class ForwardEngine:
                 self.reset()
             self.last_input_t = t
             self.frame = frame
+            self.frame_received_at = time.monotonic()
             result = self.policy.update(pose, t, associated=0 <= t - self.associated_t <= self.policy.cfg.association_s,
                                         age_s=age_s, reason=reason)
             if pose is not None:
@@ -98,6 +100,10 @@ class ForwardEngine:
     def snapshot(self):
         with self.lock:
             return dict(self.latest)
+
+    def camera_frame(self):
+        with self.lock:
+            return self.frame, self.frame_received_at
 
     def preview(self):
         with self.lock:
