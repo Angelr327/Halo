@@ -164,6 +164,7 @@ def test_main_sim_serves_live_state():
     sys.argv = ["main", "--sim", "--headless", "--stream", str(PORT + 1), "--no-gemini", "--no-hud",
                 "--port", "/dev/null-no-arduino"]
     cfg.TTS_ENABLED = False
+    cfg.BEEP_ENABLED = False
     out = io.StringIO()
 
     def run():

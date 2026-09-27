@@ -5,8 +5,8 @@
   Wiring (see README "Wiring (Arduino Uno + Pi)"). Put 5V and GND on the breadboard rails.
     Left vibration motor   D5 -> 1k -> NPN base (or module IN)   motor between 5V and collector, diode across it
     Right vibration motor  D9 -> same
-    Left buzzer            D4  (3-pin module: I/O pin; bare buzzer: through an NPN like the motors)
-    Right buzzer           D12
+    Left buzzer (optional) D4  (3-pin module: I/O pin; bare buzzer: through an NPN like the motors)
+    Right buzzer (optional) D12   (the Pi sends Z0 unless BUZZERS_ENABLED; beeps go to its earbuds)
     Ultrasonic SL (left side, pointing out ~5 deg back)   TRIG D7   ECHO D6
     Ultrasonic SR (right side, pointing out ~5 deg back)  TRIG D11  ECHO D10
       (matches the team's wiring and firmware/hcsr04_test, so the test and helmet sketches agree)
@@ -21,7 +21,9 @@
     L<n> R<n> B<n>  haptic on left / right / both: 0 stop, 1 gentle, 2 medium, 3 strong, 4 fault
     M<n>            rear light: 0 normal flash, 1 alert, 2 danger. Host sends this every 250 ms (heartbeat)
     F1 / F0         host reports a fault (camera) / clears it
-    Z1 / Z0         buzzers on / muted (they follow STRONG and FAULT haptic patterns on the same side)
+    C<n>            n short chirps (1-3) on both buzzers, no vibration (bench test); C0 stops them
+    Z1 / Z0         buzzers on / muted. A STRONG buzz adds two short chirps on the same side;
+                    FAULT keeps a long beep with the vibration
     X               everything off (bench testing)
     ?               status
   Board -> host: READY, BTN, FAILSAFE, LINK OK, ERR <line>,
@@ -43,7 +45,12 @@ const uint8_t PIN_BUZZ_L  = 4;
 const uint8_t PIN_BUZZ_R  = 12;
 const bool    BUZZER_PASSIVE = false;       // true for bare passive buzzers (need a tone; Uno plays one at a time)
 const uint16_t BUZZ_HZ    = 2300;
-const uint8_t BUZZ_MIN_LEVEL = 3;           // buzzers join STRONG (3) and FAULT (4) patterns only
+// Buzzers give short chirps rather than a long beep, so a demo room doesn't mind them.
+// Chirps per haptic level (0 stop, 1 gentle, 2 medium, 3 strong): set [2] to 1 to chirp on MEDIUM too.
+const uint8_t CHIRPS_FOR_LEVEL[4] = {0, 0, 0, 2};
+const uint16_t CHIRP_ON_MS   = 40;
+const uint16_t CHIRP_GAP_MS  = 90;
+const uint16_t CHIRP_REST_MS = 1000;        // a new chirp burst on a side waits this long after the last one
 
 // Ultrasonic sensors (HC-SR04), pinged one at a time so they don't hear each other's echoes
 const uint8_t NUM_SONAR = 4;
@@ -76,13 +83,24 @@ const Step PAT_HELLO_R[] = {{0, 400}, {190, 180}, {0, 0}};   // leading pause: l
 
 struct Motor {
   uint8_t pin;
-  uint8_t buzz;          // buzzer on the same side
   const Step* pat;
   uint8_t idx;
   uint8_t level;
   unsigned long stepStart;
+  bool faultTone;        // the FAULT pattern beeps along with the vibration
 };
-Motor motors[2] = {{PIN_MOTOR_L, PIN_BUZZ_L, nullptr, 0, 0, 0}, {PIN_MOTOR_R, PIN_BUZZ_R, nullptr, 0, 0, 0}};
+Motor motors[2] = {{PIN_MOTOR_L, nullptr, 0, 0, 0, false}, {PIN_MOTOR_R, nullptr, 0, 0, 0, false}};
+
+struct Buzzer {
+  uint8_t pin;
+  uint8_t remaining;     // chirps still to play, including the current one
+  bool on;               // chirp sounding now
+  unsigned long stepStart;
+  unsigned long burstStart;
+  bool sounding;         // what the pin was last set to
+};
+Buzzer buzzers[2] = {{PIN_BUZZ_L, 0, false, 0, 0UL - CHIRP_REST_MS, false},   // first burst may start at once
+                     {PIN_BUZZ_R, 0, false, 0, 0UL - CHIRP_REST_MS, false}};
 
 // ------------------------------------------------------------------ state
 uint8_t lightMode = 0;
@@ -115,10 +133,34 @@ void buzzWrite(uint8_t pin, bool on) {
   }
 }
 
-// Motor and its same-side buzzer move together; the buzzer only for strong/fault patterns.
 void outWrite(Motor& m, uint8_t duty) {
   motorWrite(m.pin, duty);
-  buzzWrite(m.buzz, buzzEnabled && duty > 0 && m.level >= BUZZ_MIN_LEVEL);
+  m.faultTone = duty > 0 && m.level == 4;
+}
+
+// ------------------------------------------------------------------ buzzers
+void chirp(uint8_t which, uint8_t n, unsigned long now) {
+  Buzzer& z = buzzers[which];
+  if (n == 0) { z.remaining = 0; z.on = false; return; }
+  if (z.remaining > 0 || now - z.burstStart < CHIRP_REST_MS) return;   // one burst at a time, then a rest
+  z.remaining = n;
+  z.on = true;
+  z.stepStart = now;
+  z.burstStart = now;
+}
+
+void updateBuzzer(uint8_t which, unsigned long now) {
+  Buzzer& z = buzzers[which];
+  if (z.remaining > 0 && now - z.stepStart >= (z.on ? CHIRP_ON_MS : CHIRP_GAP_MS)) {
+    z.stepStart = now;
+    if (z.on) { z.on = false; z.remaining--; }
+    else z.on = true;
+  }
+  bool want = buzzEnabled && (z.on || motors[which].faultTone);
+  if (want != z.sounding) {                     // only touch the pin on a change (tone() restarts)
+    z.sounding = want;
+    buzzWrite(z.pin, want);
+  }
 }
 
 const Step* patternFor(uint8_t level) {
@@ -155,15 +197,17 @@ void updateMotor(Motor& m, unsigned long now) {
   outWrite(m, m.pat[m.idx].duty);
 }
 
-bool playOn(uint8_t which, int level) {
+bool playOn(uint8_t which, int level, unsigned long now) {
   if (level < 0 || level > 4) return false;
   if (level == 0) {
     motors[which].pat = nullptr;
     motors[which].level = 0;
     outWrite(motors[which], 0);
+    chirp(which, 0, now);
     return true;
   }
   startPattern(motors[which], patternFor(level), level);
+  if (level < 4 && motors[which].level == level) chirp(which, CHIRPS_FOR_LEVEL[level], now);
   return true;
 }
 
@@ -186,16 +230,17 @@ void handleLine(const char* s, unsigned long now) {
   int arg = (s[1] >= '0' && s[1] <= '9') ? s[1] - '0' : -1;
   bool ok = true;
   switch (cmd) {
-    case 'L': ok = playOn(0, arg); break;
-    case 'R': ok = playOn(1, arg); break;
-    case 'B': ok = playOn(0, arg); if (ok) playOn(1, arg); break;
+    case 'L': ok = playOn(0, arg, now); break;
+    case 'R': ok = playOn(1, arg, now); break;
+    case 'B': ok = playOn(0, arg, now); if (ok) playOn(1, arg, now); break;
+    case 'C': if (arg >= 0 && arg <= 3) { chirp(0, arg, now); chirp(1, arg, now); } else ok = false; break;
     case 'M': if (arg >= 0 && arg <= 2) lightMode = arg; else ok = false; break;
     case 'F':
-      if (arg == 1 && !hostFault) { playOn(0, 4); playOn(1, 4); }
+      if (arg == 1 && !hostFault) { playOn(0, 4, now); playOn(1, 4, now); }
       if (arg == 0 || arg == 1) hostFault = (arg == 1); else ok = false;
       break;
     case 'Z': if (arg == 0 || arg == 1) buzzEnabled = (arg == 1); else ok = false; break;
-    case 'X': playOn(0, 0); playOn(1, 0); lightMode = 0; break;
+    case 'X': playOn(0, 0, now); playOn(1, 0, now); lightMode = 0; break;
     case '?':
       Serial.print(F("STATUS mode=")); Serial.print(lightMode);
       Serial.print(F(" failsafe=")); Serial.print(failsafe);
@@ -302,17 +347,19 @@ void loop() {
   if (everConnected && !failsafe && now - lastCmdMs > LINK_TIMEOUT_MS) {
     failsafe = true;                          // laptop/app died: be a normal bike light
     lightMode = 0;
-    playOn(0, 4);
-    playOn(1, 4);
+    playOn(0, 4, now);
+    playOn(1, 4, now);
     Serial.println(F("FAILSAFE"));
   }
   if (!everConnected && !bootWarned && now > BOOT_WARN_MS) {
     bootWarned = true;                        // helmet on, but the app never started
-    playOn(0, 4);
-    playOn(1, 4);
+    playOn(0, 4, now);
+    playOn(1, 4, now);
   }
 
   updateMotor(motors[0], now);
   updateMotor(motors[1], now);
+  updateBuzzer(0, now);
+  updateBuzzer(1, now);
   renderLight(now);
 }

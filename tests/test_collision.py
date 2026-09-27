@@ -360,7 +360,8 @@ class RuntimeTests(unittest.TestCase):
                     '--port', '/dev/no-arduino-collision-test']
             with patch.object(sys, 'argv', argv), patch.object(M, 'VehicleDetector', FakeDetector), \
                     patch.object(M, 'IncidentRecorder', return_value=recorder), \
-                    patch.object(cfg, 'TTS_ENABLED', False), patch.object(cfg, 'HEADLESS', True), \
+                    patch.object(cfg, 'TTS_ENABLED', False), patch.object(cfg, 'BEEP_ENABLED', False), \
+                    patch.object(cfg, 'HEADLESS', True), \
                     patch.object(cfg, 'STREAM_PORT', None), patch.object(cfg, 'GEMINI_ENABLED', False), \
                     redirect_stdout(io.StringIO()):
                 M.main()

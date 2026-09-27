@@ -60,6 +60,7 @@ def test_headless_zero_hardware():
     M.VehicleDetector = StandInDetector
     sys.argv = ["main", "--video", VIDEO, "--loop", "--headless", "--stream", str(PORT), "--no-gemini", "--port", "/dev/null-no-arduino"]
     cfg.TTS_ENABLED = False
+    cfg.BEEP_ENABLED = False
     out = io.StringIO()
     def run():
         with redirect_stdout(out):

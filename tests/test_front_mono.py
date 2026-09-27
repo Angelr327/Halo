@@ -26,6 +26,7 @@ from helmet.collision import CollisionPolicy, Settings, stopping_distance
 from helmet.forward import DualLiveSource, DualReplaySource
 from helmet.front_mono import MonoFrontEngine
 from helmet.hud import Hud, render
+from helmet.outputs import Beeper
 from helmet.sim import FrontScenario, SimSource
 from tests.test_collision import calibration
 from tools.eval_front import QUIET, approach
@@ -257,9 +258,20 @@ class CommandLineTests(unittest.TestCase):
                 "--port", "/dev/null-no-arduino"]
         cfg.TTS_ENABLED = False
         out = io.StringIO()
+        plays = []
+
+        class RecordingOut:
+            status = "recording"
+
+            def play(self, kind, side):
+                plays.append((kind, side))
+
+            def close(self):
+                pass
 
         def run():
-            with patch.object(sys, "argv", argv), redirect_stdout(out):
+            with patch.object(sys, "argv", argv), patch.object(cfg, "BEEP_ENABLED", True), \
+                    patch.object(M, "Beeper", lambda: Beeper(RecordingOut())), redirect_stdout(out):
                 M.main()
         th = threading.Thread(target=run, daemon=True)
         th.start()
@@ -278,6 +290,11 @@ class CommandLineTests(unittest.TestCase):
             self.assertLess(snap["front_obstacles"][0]["z"], 0)
             self.assertIn("| front: ", snap["scene"])
             self.assertIn("camera-only (no calibration)", out.getvalue())
+            deadline = time.monotonic() + 2                  # the main loop reads BRAKE on its next pass
+            while ("front", "B") not in plays and time.monotonic() < deadline:
+                time.sleep(0.05)
+            self.assertIn(("front", "B"), plays)
+            self.assertIn("Beeps: recording", out.getvalue())
         finally:
             urllib.request.urlopen(f"http://127.0.0.1:{port}/key?c=q", timeout=3)
             th.join(timeout=5)
