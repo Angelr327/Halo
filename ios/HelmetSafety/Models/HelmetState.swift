@@ -34,4 +34,12 @@ struct HelmetState: Equatable {
     var navigationInstruction: String
     var distanceToTurnFeet: Int
     var rideHazardCount: Int
+    // Live Pi diagnostics. Defaults preserve every existing mock/call site.
+    var detectedObjectCount: Int = 0
+    var cameraFPS: Double = 0
+    var detectionLatencyMS: Double = 0
+    var cameraFault: Bool = false
+    var serialStatus: String = ""
+    var sensitivityProfile: String = ""
+    var sonarDistances: [String: Double?] = [:]
 }

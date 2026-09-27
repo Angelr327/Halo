@@ -8,6 +8,7 @@ enum RideScreenMode {
     case summary
 }
 
+@MainActor
 final class RideViewModel: ObservableObject {
     @Published private(set) var helmetState: HelmetState
     @Published private(set) var location = LocationSnapshot.initial
@@ -16,7 +17,6 @@ final class RideViewModel: ObservableObject {
     @Published private(set) var now = Date()
     @Published private(set) var isRideActive = false
     @Published private(set) var screenMode: RideScreenMode = .preRide
-    @Published var destinationQuery = ""
     @Published private(set) var isRouting = false
     @Published var routeError: String?
     @Published private(set) var safetyEvents: [SafetyEvent] = []
@@ -26,15 +26,16 @@ final class RideViewModel: ObservableObject {
     private let service: HelmetDataProviding
     private let locationService: LocationProviding
     private let navigationService: NavigationProviding
-    private let guardianService: GuardianProviding?
+    let destinationSearchService: DestinationSearchService
     private let safetyRepository: SafetyEventStoring
     private var cancellables = Set<AnyCancellable>()
+    private var previousRideLocation: CLLocation?
 
-    init(service: HelmetDataProviding, locationService: LocationProviding, navigationService: NavigationProviding, guardianService: GuardianProviding? = nil, safetyRepository: SafetyEventStoring = SafetyEventRepository()) {
+    init(service: HelmetDataProviding, locationService: LocationProviding, navigationService: NavigationProviding, destinationSearchService: DestinationSearchService, safetyRepository: SafetyEventStoring = SafetyEventRepository()) {
         self.service = service
         self.locationService = locationService
         self.navigationService = navigationService
-        self.guardianService = guardianService
+        self.destinationSearchService = destinationSearchService
         self.safetyRepository = safetyRepository
         self.helmetState = HelmetState(isConnected: false, batteryPercentage: 0, gpsStatus: .searching, speedMPH: 0, safetyStatus: .safe, leftHazard: false, rightHazard: false, detectedObject: nil, estimatedDistance: nil, severity: .safe, navigationInstruction: "No active route", distanceToTurnFeet: 0, rideHazardCount: 0)
         service.helmetStatePublisher
@@ -45,10 +46,20 @@ final class RideViewModel: ObservableObject {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] snapshot in
                 self?.location = snapshot
+                self?.destinationSearchService.updateRegion(for: snapshot)
                 if self?.screenMode == .activeRide {
                     self?.maximumSpeedMPH = max(self?.maximumSpeedMPH ?? 0, snapshot.speedMPH)
                     self?.speedSampleTotal += snapshot.speedMPH
                     self?.speedSampleCount += 1
+                    if let latitude = snapshot.latitude, let longitude = snapshot.longitude {
+                        let current = CLLocation(latitude: latitude, longitude: longitude)
+                        if let previous = self?.previousRideLocation {
+                            self?.rideSession.distanceTravelled += current.distance(from: previous) / 1_609.344
+                        }
+                        self?.previousRideLocation = current
+                        self?.rideSession.currentLocation = RideLocation(latitude: latitude, longitude: longitude)
+                    }
+                    self?.rideSession.currentSpeed = snapshot.speedMPH
                 }
                 if let latitude = snapshot.latitude, let longitude = snapshot.longitude {
                     self?.navigationService.updateLocation(CLLocationCoordinate2D(latitude: latitude, longitude: longitude))
@@ -65,13 +76,6 @@ final class RideViewModel: ObservableObject {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] in self?.navigation = $0 }
             .store(in: &cancellables)
-        guardianService?.sessionPublisher
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] session in
-                self?.rideSession = session
-                self?.isRideActive = session.rideStatus == .active || session.rideStatus == .possibleEmergency
-            }
-            .store(in: &cancellables)
         Timer.publish(every: 1, on: .main, in: .common)
             .autoconnect()
             .sink { [weak self] in self?.now = $0 }
@@ -83,8 +87,36 @@ final class RideViewModel: ObservableObject {
             routeError = NavigationError.locationUnavailable.localizedDescription
             return
         }
-        let destination = destinationQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        let destination = destinationSearchService.query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !destination.isEmpty else { return }
+        isRouting = true
+        routeError = nil
+        defer { isRouting = false }
+        do {
+            try await navigationService.calculateRoute(to: destination, from: CLLocationCoordinate2D(latitude: latitude, longitude: longitude))
+        } catch {
+            routeError = error.localizedDescription
+        }
+    }
+
+    func selectDestination(_ suggestion: DestinationSuggestion) async {
+        do {
+            let destination = try await destinationSearchService.select(suggestion)
+            await route(to: destination)
+        } catch {
+            routeError = error.localizedDescription
+        }
+    }
+
+    func selectRecentDestination(_ destination: Destination) async {
+        await route(to: destinationSearchService.selectRecent(destination))
+    }
+
+    private func route(to destination: Destination) async {
+        guard let latitude = location.latitude, let longitude = location.longitude else {
+            routeError = NavigationError.locationUnavailable.localizedDescription
+            return
+        }
         isRouting = true
         routeError = nil
         defer { isRouting = false }
@@ -99,8 +131,12 @@ final class RideViewModel: ObservableObject {
         maximumSpeedMPH = 0
         speedSampleTotal = 0
         speedSampleCount = 0
+        previousRideLocation = nil
         service.startRide()
-        guardianService?.startRide()
+        rideSession = .empty
+        rideSession.id = UUID()
+        rideSession.startTime = Date()
+        rideSession.rideStatus = .active
         navigationService.startNavigation()
         isRideActive = true
         screenMode = .activeRide
@@ -108,7 +144,9 @@ final class RideViewModel: ObservableObject {
 
     func endRide() {
         service.endRide()
-        guardianService?.endRide()
+        rideSession.endTime = Date()
+        rideSession.rideStatus = .ended
+        rideSession.currentSpeed = 0
         navigationService.stopNavigation()
         isRideActive = false
         screenMode = .summary
@@ -116,6 +154,10 @@ final class RideViewModel: ObservableObject {
 
     func finishSummary() {
         screenMode = .preRide
+    }
+
+    func setVoiceMuted(_ muted: Bool) {
+        navigationService.setVoiceMuted(muted)
     }
 
     var headingText: String {

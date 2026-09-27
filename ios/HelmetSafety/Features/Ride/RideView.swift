@@ -5,10 +5,11 @@ struct RideView: View {
     @StateObject private var viewModel: RideViewModel
     @State private var cameraPosition: MapCameraPosition = .automatic
     @State private var showingEndConfirmation = false
-    @State private var isVoiceMuted = false
+    let startRequest: Int
 
-    init(service: HelmetDataProviding = MockHelmetService(), locationService: LocationProviding = LocationService(), navigationService: NavigationProviding = NavigationService(), guardianService: GuardianProviding? = nil, safetyRepository: SafetyEventStoring = SafetyEventRepository()) {
-        _viewModel = StateObject(wrappedValue: RideViewModel(service: service, locationService: locationService, navigationService: navigationService, guardianService: guardianService, safetyRepository: safetyRepository))
+    init(service: HelmetDataProviding, locationService: LocationProviding, navigationService: NavigationProviding, destinationSearchService: DestinationSearchService, safetyRepository: SafetyEventStoring, startRequest: Int = 0) {
+        _viewModel = StateObject(wrappedValue: RideViewModel(service: service, locationService: locationService, navigationService: navigationService, destinationSearchService: destinationSearchService, safetyRepository: safetyRepository))
+        self.startRequest = startRequest
     }
 
     var body: some View {
@@ -24,11 +25,14 @@ struct RideView: View {
             Button("Cancel", role: .cancel) {}
             Button("End & Save Ride", role: .destructive) { viewModel.endRide() }
         } message: {
-            Text("Your ride statistics and Guardian session will be saved locally.")
+            Text("Your ride statistics will be saved locally.")
         }
         .onChange(of: viewModel.screenMode) { _, mode in
             if mode == .activeRide { recenterMap() }
             else { cameraPosition = .automatic }
+        }
+        .onChange(of: startRequest) { _, _ in
+            viewModel.startRide()
         }
     }
 
@@ -54,7 +58,8 @@ struct RideView: View {
             AppSectionHeader(title: "Ready to ride?", detail: viewModel.location.status.rawValue)
             HStack(spacing: AppSpacing.medium) {
                 statusPill(viewModel.helmetState.isConnected ? "Helmet connected" : "Helmet offline", icon: viewModel.helmetState.isConnected ? "checkmark.circle.fill" : "xmark.circle.fill", color: viewModel.helmetState.isConnected ? AppTheme.safe : AppTheme.danger)
-                statusPill("\(viewModel.helmetState.batteryPercentage)%", icon: "battery.75percent", color: viewModel.helmetState.batteryPercentage < 20 ? AppTheme.danger : AppTheme.primaryText)
+                Spacer()
+                HaloLogoView()
             }
         }
     }
@@ -62,16 +67,10 @@ struct RideView: View {
     private var destinationCard: some View {
         VStack(alignment: .leading, spacing: AppSpacing.medium) {
             Text("WHERE TO?").font(AppTypography.cardTitle).tracking(0.8).foregroundStyle(AppTheme.secondaryText)
-            HStack(spacing: AppSpacing.medium) {
-                Image(systemName: "magnifyingglass").foregroundStyle(AppTheme.secondaryText)
-                TextField("Enter a destination", text: $viewModel.destinationQuery)
-                    .submitLabel(.search)
-                    .onSubmit { Task { await viewModel.calculateRoute() } }
-                Button { Task { await viewModel.calculateRoute() } } label: {
-                    if viewModel.isRouting { ProgressView() }
-                    else { Image(systemName: "arrow.right.circle.fill").font(.title2) }
-                }
-                .disabled(viewModel.destinationQuery.trimmingCharacters(in: .whitespaces).isEmpty || viewModel.isRouting)
+            DestinationSearchField(service: viewModel.destinationSearchService, placeholder: "Enter a destination") {
+                await viewModel.selectDestination($0)
+            } onRecentSelect: {
+                await viewModel.selectRecentDestination($0)
             }
             if let error = viewModel.routeError { Text(error).font(.caption).foregroundStyle(AppTheme.danger) }
         }
@@ -118,12 +117,17 @@ struct RideView: View {
             VStack(spacing: AppSpacing.medium) {
                 activeStatusBar
                 navigationInstructionCard
+                if viewModel.helmetState.leftHazard || viewModel.helmetState.rightHazard {
+                    liveHazardCard
+                }
                 Spacer()
                 HStack(alignment: .bottom, spacing: AppSpacing.medium) {
                     liveMetricsCard
                     VStack(spacing: AppSpacing.small) {
                         mapControlButton("location.fill", action: recenterMap)
-                        mapControlButton(isVoiceMuted ? "speaker.slash.fill" : "speaker.wave.2.fill") { isVoiceMuted.toggle() }
+                        mapControlButton(viewModel.navigation.isVoiceMuted ? "speaker.slash.fill" : "speaker.wave.2.fill") {
+                            viewModel.setVoiceMuted(!viewModel.navigation.isVoiceMuted)
+                        }
                     }
                 }
                 bottomControls
@@ -137,7 +141,7 @@ struct RideView: View {
         HStack {
             statusPill(viewModel.helmetState.isConnected ? "Helmet" : "Offline", icon: viewModel.helmetState.isConnected ? "checkmark.circle.fill" : "xmark.circle.fill", color: viewModel.helmetState.isConnected ? AppTheme.safe : AppTheme.danger)
             Spacer()
-            statusPill("\(viewModel.helmetState.batteryPercentage)%", icon: "battery.75percent", color: viewModel.helmetState.batteryPercentage < 20 ? AppTheme.danger : AppTheme.primaryText)
+            HaloLogoView()
         }
     }
 
@@ -153,6 +157,62 @@ struct RideView: View {
             Spacer()
         }
         .appCard(padding: 14)
+    }
+
+    private var liveHazardCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label(hazardTitle, systemImage: "exclamationmark.triangle.fill")
+                    .font(.headline.weight(.bold))
+                Spacer()
+                Text(viewModel.helmetState.severity.rawValue.uppercased())
+                    .font(.caption2.weight(.black)).tracking(0.8)
+            }
+            HStack(spacing: 10) {
+                liveSideIndicator(.left, active: viewModel.helmetState.leftHazard)
+                liveSideIndicator(.right, active: viewModel.helmetState.rightHazard)
+            }
+            HStack {
+                if let object = viewModel.helmetState.detectedObject {
+                    Label(object, systemImage: "car.side.fill")
+                }
+                Spacer()
+                if let distance = viewModel.helmetState.estimatedDistance {
+                    Label(String(format: "%.1f m", distance), systemImage: "ruler")
+                }
+            }
+            .font(.caption.weight(.semibold))
+        }
+        .foregroundStyle(.white)
+        .padding(14)
+        .background(hazardColor.opacity(0.94), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .shadow(color: hazardColor.opacity(0.3), radius: 12, y: 4)
+        .accessibilityElement(children: .combine)
+    }
+
+    private func liveSideIndicator(_ side: SafetyEventSide, active: Bool) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: side == .left ? "arrow.left" : "arrow.right")
+            Text(side.rawValue.uppercased())
+        }
+        .font(.subheadline.weight(.black))
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 10)
+        .background(.white.opacity(active ? 0.22 : 0.06), in: RoundedRectangle(cornerRadius: 11))
+        .opacity(active ? 1 : 0.45)
+    }
+
+    private var hazardTitle: String {
+        switch (viewModel.helmetState.leftHazard, viewModel.helmetState.rightHazard) {
+        case (true, true): "Vehicles approaching both sides"
+        case (true, false): "Vehicle approaching left"
+        case (false, true): "Vehicle approaching right"
+        default: "Hazard detected"
+        }
+    }
+
+    private var hazardColor: Color {
+        viewModel.helmetState.safetyStatus == .danger ? AppTheme.danger : AppTheme.caution
     }
 
     private var liveMetricsCard: some View {
@@ -196,7 +256,7 @@ struct RideView: View {
                         summaryRow("Safety events", "\(viewModel.currentRideEvents.count)")
                         summaryRow("Close calls", "\(viewModel.closeCallCount)")
                         summaryRow("High-risk events", "\(viewModel.highRiskEventCount)")
-                        summaryRow("Helmet at finish", viewModel.helmetState.isConnected ? "Connected · \(viewModel.helmetState.batteryPercentage)%" : "Disconnected")
+                        summaryRow("Helmet at finish", viewModel.helmetState.isConnected ? "Connected" : "Disconnected")
                     }
                     Button(action: viewModel.finishSummary) {
                         Text("DONE").font(.headline.weight(.bold)).frame(maxWidth: .infinity).padding(.vertical, 17)
@@ -238,7 +298,18 @@ struct RideView: View {
     }
 
     private func recenterMap() {
-        cameraPosition = .userLocation(followsHeading: viewModel.location.headingDegrees != nil, fallback: .automatic)
+        guard let latitude = viewModel.location.latitude, let longitude = viewModel.location.longitude else {
+            cameraPosition = .userLocation(followsHeading: true, fallback: .automatic)
+            return
+        }
+        cameraPosition = .camera(
+            MapCamera(
+                centerCoordinate: CLLocationCoordinate2D(latitude: latitude, longitude: longitude),
+                distance: 280,
+                heading: viewModel.location.headingDegrees ?? 0,
+                pitch: 55
+            )
+        )
     }
 
     private func statusPill(_ title: String, icon: String, color: Color) -> some View {

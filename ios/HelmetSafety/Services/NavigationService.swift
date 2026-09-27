@@ -5,15 +5,23 @@ import MapKit
 protocol NavigationProviding: AnyObject {
     var navigationPublisher: AnyPublisher<NavigationState, Never> { get }
     func calculateRoute(to destination: String, from origin: CLLocationCoordinate2D) async throws
+    func calculateRoute(to destination: Destination, from origin: CLLocationCoordinate2D) async throws
     func startNavigation()
     func stopNavigation()
     func updateLocation(_ coordinate: CLLocationCoordinate2D)
+    func setVoiceMuted(_ muted: Bool)
 }
 
 final class NavigationService: NavigationProviding {
     private let stateSubject = CurrentValueSubject<NavigationState, Never>(NavigationState())
     private var steps: [MKRoute.Step] = []
     private var currentStepIndex = 0
+    private var announcedDistanceBand: Int?
+    private let voice: NavigationVoiceProviding
+
+    init(voice: NavigationVoiceProviding = NavigationVoiceService()) {
+        self.voice = voice
+    }
 
     var navigationPublisher: AnyPublisher<NavigationState, Never> {
         stateSubject.eraseToAnyPublisher()
@@ -28,8 +36,14 @@ final class NavigationService: NavigationProviding {
         let response = try await MKLocalSearch(request: request).start()
         guard let destinationItem = response.mapItems.first else { throw NavigationError.destinationNotFound }
 
+        try await calculateRoute(to: Destination(name: destinationItem.name ?? destination, subtitle: nil, coordinate: destinationItem.placemark.coordinate), from: origin)
+    }
+
+    func calculateRoute(to destination: Destination, from origin: CLLocationCoordinate2D) async throws {
         let directionsRequest = MKDirections.Request()
         directionsRequest.source = MKMapItem(placemark: MKPlacemark(coordinate: origin))
+        let destinationItem = MKMapItem(placemark: MKPlacemark(coordinate: destination.coordinate))
+        destinationItem.name = destination.name
         directionsRequest.destination = destinationItem
         // MapKit has no public cycling transport type, so walking is the safest
         // available approximation for an MVP bicycle route.
@@ -41,9 +55,10 @@ final class NavigationService: NavigationProviding {
 
         steps = route.steps.filter { !$0.instructions.isEmpty && $0.distance > 0 }
         currentStepIndex = 0
+        announcedDistanceBand = nil
         var state = stateSubject.value
-        state.destinationName = destinationItem.name ?? destination
-        state.destinationCoordinate = destinationItem.placemark.coordinate
+        state.destinationName = destination.name
+        state.destinationCoordinate = destination.coordinate
         state.route = route
         state.maneuver = steps.first.map(Self.simplify)
         state.isNavigating = false
@@ -57,6 +72,8 @@ final class NavigationService: NavigationProviding {
         state.isNavigating = true
         state.statusMessage = "Navigation active"
         stateSubject.send(state)
+        let firstDistance = steps.first.map { Self.spokenDistance($0.distance) } ?? "a short distance"
+        announceCurrentStep(prefix: "Starting route to \(state.destinationName ?? "your destination"). In \(firstDistance),")
     }
 
     func stopNavigation() {
@@ -64,24 +81,36 @@ final class NavigationService: NavigationProviding {
         state.isNavigating = false
         state.statusMessage = state.route == nil ? "Enter a destination" : "Route ready"
         stateSubject.send(state)
+        voice.stop()
     }
 
     func updateLocation(_ coordinate: CLLocationCoordinate2D) {
         guard stateSubject.value.isNavigating, currentStepIndex < steps.count else { return }
-        let step = steps[currentStepIndex]
-        let target = Self.lastCoordinate(of: step.polyline)
-        let remaining = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
+        var target = Self.lastCoordinate(of: steps[currentStepIndex].polyline)
+        var remaining = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
             .distance(from: CLLocation(latitude: target.latitude, longitude: target.longitude))
 
         if remaining < 22, currentStepIndex < steps.count - 1 {
             currentStepIndex += 1
+            announcedDistanceBand = nil
+            target = Self.lastCoordinate(of: steps[currentStepIndex].polyline)
+            remaining = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
+                .distance(from: CLLocation(latitude: target.latitude, longitude: target.longitude))
         }
 
         var maneuver = Self.simplify(steps[currentStepIndex])
-        maneuver = NavigationManeuver(maneuverType: maneuver.maneuverType, direction: maneuver.direction, streetName: maneuver.streetName, distanceMeters: max(0, remaining))
+        maneuver = NavigationManeuver(maneuverType: maneuver.maneuverType, direction: maneuver.direction, streetName: maneuver.streetName, instruction: maneuver.instruction, distanceMeters: max(0, remaining))
         var state = stateSubject.value
         state.maneuver = maneuver
         stateSubject.send(state)
+        announceIfNeeded(remainingMeters: remaining)
+    }
+
+    func setVoiceMuted(_ muted: Bool) {
+        var state = stateSubject.value
+        state.isVoiceMuted = muted
+        stateSubject.send(state)
+        if muted { voice.stop() }
     }
 
     static func simplify(_ step: MKRoute.Step) -> NavigationManeuver {
@@ -108,8 +137,31 @@ final class NavigationService: NavigationProviding {
             maneuverType: type,
             direction: direction,
             streetName: streetName(from: step.instructions),
+            instruction: step.instructions,
             distanceMeters: step.distance
         )
+    }
+
+    private func announceIfNeeded(remainingMeters: CLLocationDistance) {
+        let band: Int?
+        if remainingMeters <= 35 { band = 0 }
+        else if remainingMeters <= 120 { band = 1 }
+        else if remainingMeters <= 350 { band = 2 }
+        else { band = nil }
+        guard let band, band != announcedDistanceBand else { return }
+        announcedDistanceBand = band
+        announceCurrentStep(prefix: band == 0 ? "Now," : "In \(Self.spokenDistance(remainingMeters)),")
+    }
+
+    private func announceCurrentStep(prefix: String) {
+        guard !stateSubject.value.isVoiceMuted, currentStepIndex < steps.count else { return }
+        voice.speak("\(prefix) \(steps[currentStepIndex].instructions)")
+    }
+
+    private static func spokenDistance(_ meters: CLLocationDistance) -> String {
+        let feet = meters * 3.28084
+        if feet < 1_000 { return "\(max(50, Int((feet / 50).rounded()) * 50)) feet" }
+        return String(format: "%.1f miles", meters / 1_609.344)
     }
 
     private static func streetName(from instruction: String) -> String {
