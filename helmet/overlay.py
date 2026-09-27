@@ -131,6 +131,8 @@ class Overlay:
             _text(img, "CAMERA FAULT - alerts offline", (20, h // 2 + 10), 0.9, (255, 255, 255), 2)
         if c["shaky"]:
             _text(img, "SHAKE", (w - 90, 60), 0.6, (0, 255, 255), 2)
+        if c.get("incident"):
+            _text(img, "SAVING INCIDENT", (w // 2 - 70, 52), 0.55, (255, 255, 255), 1, bg=(0, 0, 160))
         if c["recording"] and int(t_wall * 2) % 2 == 0:
             cv2.circle(img, (60, 60), 7, (0, 0, 255), -1)
             _text(img, "REC", (72, 66), 0.5, (0, 0, 255), 2)
