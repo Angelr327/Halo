@@ -161,6 +161,24 @@ sensor reads under 50 cm.
 No rewiring is needed to go back to `helmet_arduino.ino`. Close Serial Monitor before using
 the helmet app or bench tool.
 
+## Camera mounting
+
+With the Pi on top of the helmet, the **rear camera is mounted upside down** (its cable runs down
+the back of the helmet) and the **front camera the normal way up**. In `helmet/config.py`:
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `CAMERA_INDEX` | `0` | which camera is the rear one (Pi camera number = CSI port) |
+| `CAMERA_ROTATE_180` | `True` | rear camera upside down; rotated in the camera itself (no CPU cost) |
+| `FRONT_CAMERA_INDEX` | `1` | the front camera |
+| `FRONT_CAMERA_ROTATE_180` | `False` | front camera upright |
+| `MIRROR_VIEW` | `True` | applied after the rotation, so rider-left shows on the left |
+
+Check with `python -m tools.bench check`: each Camera Module is labelled rear/front and its
+snapshot (`check_csi0.jpg`, `check_csi1.jpg`) is saved as the app will see it. If the rear
+snapshot shows the front view, swap `CAMERA_INDEX` and `FRONT_CAMERA_INDEX`. Then do
+calibration step 1 (a teammate on your left must show up as `LEFT`).
+
 ## Camera + ultrasonic fusion
 
 The rear camera sees about ±33° either side of straight back, so a car right **beside** you is

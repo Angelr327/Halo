@@ -212,11 +212,18 @@ class _Grabber:
 
 def _open_csi(num, model):
     from picamera2 import Picamera2
+    role, rot = ("rear", cfg.CAMERA_ROTATE_180) if num == cfg.CAMERA_INDEX else \
+        ("front", cfg.FRONT_CAMERA_ROTATE_180) if num == cfg.FRONT_CAMERA_INDEX else ("?", False)
+    extra = {}
+    if rot:
+        from libcamera import Transform
+        extra["transform"] = Transform(hflip=1, vflip=1)      # same as the helmet app: snapshots show what it sees
     cam = Picamera2(num)
     cam.configure(cam.create_video_configuration(
-        main={"size": (cfg.CAPTURE_WIDTH, cfg.CAPTURE_HEIGHT), "format": "RGB888"}, buffer_count=2))
+        main={"size": (cfg.CAPTURE_WIDTH, cfg.CAPTURE_HEIGHT), "format": "RGB888"}, buffer_count=2, **extra))
     cam.start()
-    return _Grabber(f"CSI{num} {model}", lambda: cam.capture_array("main"), lambda: (cam.stop(), cam.close()))
+    label = f"CSI{num} {role}{' (rotated 180)' if rot else ''} {model}"
+    return _Grabber(label, lambda: cam.capture_array("main"), lambda: (cam.stop(), cam.close()))
 
 
 def _open_usb(index, name):
