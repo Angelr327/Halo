@@ -64,7 +64,7 @@ struct SafetyEventDetailView: View {
             detailRow("Detected", viewModel.event.detectedObject ?? "Unavailable")
             detailRow("Camera", viewModel.event.cameraId ?? "Unavailable")
             detailRow("Side", viewModel.event.side?.rawValue.capitalized ?? "Unavailable")
-            detailRow("Distance", viewModel.event.estimatedDistanceMeters.map { String(format: "%.1f meters", $0) } ?? "Unavailable")
+            detailRow("Distance", viewModel.event.estimatedDistanceMeters.map { String(format: "%.0f feet", $0 * 3.28084) } ?? "Unavailable")
             detailRow("Confidence", viewModel.event.confidence.map { String(format: "%.0f%%", $0 * 100) } ?? "Unavailable")
             detailRow("Speed", viewModel.event.speed.map { String(format: "%.1f mph", $0) } ?? "Unavailable")
             if let latitude = viewModel.event.latitude, let longitude = viewModel.event.longitude {

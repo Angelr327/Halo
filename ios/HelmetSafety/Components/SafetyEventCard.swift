@@ -17,7 +17,7 @@ struct SafetyEventCard: View {
                 Label(event.side?.rawValue.capitalized ?? "Unknown side", systemImage: sideIcon)
                 Spacer()
                 if let distance = event.estimatedDistanceMeters {
-                    Label(String(format: "%.1f m", distance), systemImage: "ruler")
+                    Label(String(format: "%.0f ft", distance * 3.28084), systemImage: "ruler")
                 }
             }
             .font(.subheadline).foregroundStyle(AppTheme.secondaryText)

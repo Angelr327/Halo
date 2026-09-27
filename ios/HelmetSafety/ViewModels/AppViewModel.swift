@@ -47,9 +47,7 @@ final class AppViewModel: ObservableObject {
                 }
                 safetyEventRepository.add(enriched)
                 guard enriched.isHistorical != true else { return }
-                if enriched.eventType == .emergencyBrakeWarning {
-                    UINotificationFeedbackGenerator().notificationOccurred(.error)
-                }
+                Self.playHazardHaptic(for: enriched)
                 voiceService.speak(
                     Self.hazardAnnouncement(for: enriched),
                     priority: enriched.severity == .critical || enriched.severity == .high ? .criticalHazard : .hazard
@@ -74,10 +72,28 @@ final class AppViewModel: ObservableObject {
         case .rear?: side = "behind you"
         case .unknown?, nil: side = "nearby"
         }
-        let distance = event.estimatedDistanceMeters.map { String(format: ", %.1f meters", $0) } ?? ""
+        let distance = event.estimatedDistanceMeters.map {
+            String(format: ", %.0f feet", $0 * 3.28084)
+        } ?? ""
         if event.severity == .critical || event.severity == .high {
             return "Warning. \(object) very close \(side)\(distance)."
         }
         return "\(object.capitalized) approaching \(side)\(distance)."
+    }
+
+    private static func playHazardHaptic(for event: SafetyEvent) {
+        if event.eventType == .emergencyBrakeWarning {
+            UINotificationFeedbackGenerator().notificationOccurred(.error)
+            return
+        }
+        if event.side == .rear && event.eventType == .vehicleApproach {
+            UIImpactFeedbackGenerator(style: event.severity == .high || event.severity == .critical ? .heavy : .medium)
+                .impactOccurred()
+            return
+        }
+        if (event.side == .left || event.side == .right) &&
+            (event.severity == .high || event.severity == .critical) {
+            UINotificationFeedbackGenerator().notificationOccurred(.warning)
+        }
     }
 }
