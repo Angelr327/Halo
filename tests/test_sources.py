@@ -52,6 +52,20 @@ def test_config_defaults_for_the_helmet():
     print(f"  rear camera {cfg.CAMERA_INDEX} upside down, front camera {cfg.FRONT_CAMERA_INDEX} upright")
 
 
+def test_camera_chosen_by_connector_not_number():
+    both = [{"Id": "/base/axi/pcie@1000120000/rp1/i2c@88000/ov5647@36", "Num": 0},
+            {"Id": "/base/axi/pcie@1000120000/rp1/i2c@80000/ov5647@36", "Num": 1}]
+    assert sources.pi_camera_num("i2c@80000", both) == 1
+    only = [dict(both[1], Num=0)]                    # the other camera dropped out: numbers shift
+    assert sources.pi_camera_num("i2c@80000", only) == 0
+    try:
+        sources.pi_camera_num("i2c@88000", only)
+        raise AssertionError("a missing camera must fail loudly, not fall back to the other one")
+    except RuntimeError as e:
+        assert "i2c@88000" in str(e)
+    print("  connector i2c@80000 found as camera 1, then as camera 0 when the other drops out")
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):

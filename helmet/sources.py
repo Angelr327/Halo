@@ -173,6 +173,14 @@ class PiCamera(LiveCamera):
     """Camera Module 3 (the Wide version's ~120 deg view suits blind spots) via Picamera2.
     Install with apt (python3-picamera2) and create the venv with --system-site-packages."""
 
+    def __init__(self, index=None, rotate_180=None, port=None):
+        if port is None:                       # rear by default; the front camera's number means the front connector
+            port = cfg.CAMERA_PORT if index is None else \
+                cfg.FRONT_CAMERA_PORT if index == cfg.FRONT_CAMERA_INDEX else None
+        if port:
+            index = pi_camera_num(port)
+        super().__init__(index, rotate_180)
+
     def _open(self):
         from picamera2 import Picamera2
         self.cam = Picamera2(self.index)
@@ -221,6 +229,19 @@ class PiCamera(LiveCamera):
             pass
         finally:
             self.cam.close()  # stop alone keeps the camera acquired
+
+
+def pi_camera_num(port, info=None):
+    """Camera number of the Pi camera on a connector ("i2c@80000"). libcamera numbers cameras in
+    the order it finds them, so they swap when one drops out; the connector in the Id doesn't."""
+    if info is None:
+        from picamera2 import Picamera2
+        info = Picamera2.global_camera_info()
+    for i, c in enumerate(info):
+        if port in c.get("Id", ""):
+            return c.get("Num", i)
+    raise RuntimeError(f"no Pi camera on connector {port!r} (found: {[c.get('Id') for c in info]}). "
+                       "Check its ribbon cable, or clear CAMERA_PORT in config.py to use CAMERA_INDEX")
 
 
 def _pi_camera_present():
