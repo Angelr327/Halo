@@ -2,8 +2,12 @@ import SwiftUI
 
 struct SafetyView: View {
     @StateObject private var viewModel: SafetyViewModel
+    private let repository: SafetyEventStoring
+    private let analysisService: IncidentAnalysisProviding
 
-    init(repository: SafetyEventStoring = SafetyEventRepository()) {
+    init(repository: SafetyEventStoring, analysisService: IncidentAnalysisProviding) {
+        self.repository = repository
+        self.analysisService = analysisService
         _viewModel = StateObject(wrappedValue: SafetyViewModel(repository: repository))
     }
 
@@ -14,8 +18,8 @@ struct SafetyView: View {
                     VStack(spacing: 14) {
                         HStack {
                             VStack(alignment: .leading, spacing: 4) {
-                                Text("SAFETY SCORE").font(.caption.weight(.bold)).tracking(1).foregroundStyle(AppTheme.secondaryText)
-                                Text("\(viewModel.safetyScore)").font(.system(size: 48, weight: .bold, design: .rounded))
+                                Text("RIDE SAFETY SUMMARY").font(.caption.weight(.bold)).tracking(1).foregroundStyle(AppTheme.secondaryText)
+                                Text(viewModel.highRiskCount == 0 ? "All clear" : "Review incidents").font(.title2.weight(.bold))
                             }
                             Spacer()
                             ZStack {
@@ -36,10 +40,13 @@ struct SafetyView: View {
                     .listRowInsets(EdgeInsets()).listRowBackground(Color.clear)
                 }
 
-                Section("Recent incidents") {
+                Section("Incidents") {
+                    if viewModel.events.isEmpty {
+                        ContentUnavailableView("No incidents", systemImage: "shield.checkered", description: Text("Recorded helmet safety events will appear here."))
+                    }
                     ForEach(viewModel.events) { event in
                         NavigationLink {
-                            SafetyEventDetailView(event: event)
+                            SafetyEventDetailView(event: event, repository: repository, analysisService: analysisService)
                         } label: {
                             SafetyEventCard(event: event)
                         }

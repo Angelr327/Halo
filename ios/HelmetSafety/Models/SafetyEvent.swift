@@ -34,19 +34,32 @@ enum SafetyEventSeverity: String, Codable, CaseIterable {
     case critical
 }
 
+enum IncidentAnalysisState: String, Codable {
+    case notAnalyzed
+    case analyzing
+    case available
+    case failed
+}
+
 struct SafetyEvent: Identifiable, Codable, Equatable {
     var id: UUID
     var timestamp: Date
     var eventType: SafetyEventType
     var severity: SafetyEventSeverity
-    var side: SafetyEventSide
+    var cameraId: String?
+    var side: SafetyEventSide?
     var detectedObject: String?
     var estimatedDistanceMeters: Double?
+    var confidence: Double?
     var latitude: Double?
     var longitude: Double?
     var speed: Double?
     var videoPath: String?
+    var videoURL: URL?
+    var aiSummary: String?
+    var aiAnalysisState: IncidentAnalysisState?
     var notes: String?
 
     var hasLocation: Bool { latitude != nil && longitude != nil }
+    var hasPlayableVideo: Bool { videoURL?.scheme != nil }
 }

@@ -14,7 +14,7 @@ struct SafetyEventCard: View {
                     .foregroundStyle(severityColor)
             }
             HStack {
-                Label(event.side.rawValue.capitalized, systemImage: sideIcon)
+                Label(event.side?.rawValue.capitalized ?? "Unknown side", systemImage: sideIcon)
                 Spacer()
                 if let distance = event.estimatedDistanceMeters {
                     Label(String(format: "%.1f m", distance), systemImage: "ruler")
@@ -44,10 +44,10 @@ struct SafetyEventCard: View {
 
     private var sideIcon: String {
         switch event.side {
-        case .left: "arrow.left"
-        case .right: "arrow.right"
-        case .rear: "arrow.down"
-        case .unknown: "questionmark"
+        case .left?: "arrow.left"
+        case .right?: "arrow.right"
+        case .rear?: "arrow.down"
+        case .unknown?, nil: "questionmark"
         }
     }
 

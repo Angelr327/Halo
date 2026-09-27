@@ -146,8 +146,10 @@
 				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = 4SMW578S7A;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsLocalNetworking = YES;
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Connect to your helmet's Raspberry Pi camera and safety service on the local network.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Your location is used to show live ride speed, heading, and position.";
 				INFOPLIST_KEY_NSMotionUsageDescription = "Motion data helps detect unusual movement and possible ride incidents.";
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -169,8 +171,10 @@
 				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = 4SMW578S7A;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsLocalNetworking = YES;
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Connect to your helmet's Raspberry Pi camera and safety service on the local network.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Your location is used to show live ride speed, heading, and position.";
 				INFOPLIST_KEY_NSMotionUsageDescription = "Motion data helps detect unusual movement and possible ride incidents.";
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;

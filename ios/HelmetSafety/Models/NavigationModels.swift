@@ -25,6 +25,7 @@ struct NavigationManeuver: Equatable, Codable {
     let maneuverType: ManeuverType
     let direction: NavigationDirection
     let streetName: String
+    let instruction: String
     let distanceMeters: Double
 }
 
@@ -34,6 +35,7 @@ struct NavigationState {
     var route: MKRoute?
     var maneuver: NavigationManeuver?
     var isNavigating = false
+    var isVoiceMuted = false
     var statusMessage = "Enter a destination"
 }
 

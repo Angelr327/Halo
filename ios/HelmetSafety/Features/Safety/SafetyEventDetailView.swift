@@ -1,84 +1,104 @@
+import AVKit
 import MapKit
 import SwiftUI
 
 struct SafetyEventDetailView: View {
-    let event: SafetyEvent
+    @StateObject private var viewModel: SafetyEventDetailViewModel
+
+    init(event: SafetyEvent, repository: SafetyEventStoring, analysisService: IncidentAnalysisProviding) {
+        _viewModel = StateObject(wrappedValue: SafetyEventDetailViewModel(event: event, repository: repository, analysisService: analysisService))
+    }
 
     var body: some View {
         ScrollView {
             VStack(spacing: 16) {
+                incidentHeader
+                videoCard
                 metadataCard
-                locationCard
-                if let coordinate = coordinate {
+                if let coordinate {
                     Map(initialPosition: .region(MKCoordinateRegion(center: coordinate, latitudinalMeters: 700, longitudinalMeters: 700))) {
-                        Marker(event.eventType.displayName, coordinate: coordinate)
+                        Marker(viewModel.event.eventType.displayName, coordinate: coordinate)
                     }
-                    .frame(height: 220)
-                    .clipShape(RoundedRectangle(cornerRadius: 18))
-                    .accessibilityLabel("Safety event map location")
+                    .frame(height: 210).clipShape(RoundedRectangle(cornerRadius: 18))
                 }
-                videoPlaceholder
-                aiSummaryPlaceholder
-            }
-            .padding()
+                analysisCard
+            }.padding()
         }
         .background(AppTheme.background.ignoresSafeArea())
-        .navigationTitle("Event Details")
+        .navigationTitle("Incident Detail")
         .navigationBarTitleDisplayMode(.inline)
     }
 
-    private var metadataCard: some View {
-        DashboardCard(title: "Event metadata") {
-            detailRow("Event", event.eventType.displayName)
-            detailRow("Timestamp", event.timestamp.formatted(date: .long, time: .standard))
-            detailRow("Severity", event.severity.rawValue.capitalized)
-            detailRow("Side", event.side.rawValue.capitalized)
-            detailRow("Object", event.detectedObject ?? "Unknown")
-            detailRow("Distance", event.estimatedDistanceMeters.map { String(format: "%.1f meters", $0) } ?? "Unavailable")
-            detailRow("Speed", event.speed.map { String(format: "%.1f mph", $0) } ?? "Unavailable")
-            if let notes = event.notes { Divider(); Text(notes).font(.subheadline).foregroundStyle(AppTheme.secondaryText) }
-        }
+    private var incidentHeader: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(viewModel.event.eventType.displayName).font(.title.bold())
+            Text(viewModel.event.timestamp.formatted(date: .abbreviated, time: .shortened)).foregroundStyle(AppTheme.secondaryText)
+            Text(viewModel.event.severity.rawValue.uppercased()).font(.caption.weight(.black)).tracking(1)
+                .foregroundStyle(viewModel.event.severity == .high || viewModel.event.severity == .critical ? AppTheme.danger : AppTheme.caution)
+        }.frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private var locationCard: some View {
-        DashboardCard(title: "Location") {
-            if let latitude = event.latitude, let longitude = event.longitude {
-                detailRow("Latitude", String(format: "%.6f", latitude))
-                detailRow("Longitude", String(format: "%.6f", longitude))
+    private var videoCard: some View {
+        DashboardCard(title: "Incident video") {
+            if let url = viewModel.event.videoURL, viewModel.event.hasPlayableVideo {
+                VideoPlayer(player: AVPlayer(url: url)).frame(height: 210).clipShape(RoundedRectangle(cornerRadius: 12))
             } else {
-                Label("Location unavailable", systemImage: "location.slash").foregroundStyle(AppTheme.secondaryText)
+                VStack(spacing: 10) {
+                    Image(systemName: "video.slash.fill").font(.system(size: 34)).foregroundStyle(AppTheme.secondaryText)
+                    Text("Incident video unavailable from helmet").font(.headline).multilineTextAlignment(.center)
+                    if let path = viewModel.event.videoPath {
+                        Text("The Pi recorded \(path), but does not expose saved clips over HTTP.").font(.caption).multilineTextAlignment(.center).foregroundStyle(AppTheme.secondaryText)
+                    } else {
+                        Text("No retrievable clip URL was provided for this incident.").font(.caption).foregroundStyle(AppTheme.secondaryText)
+                    }
+                }.frame(maxWidth: .infinity, minHeight: 130)
             }
         }
     }
 
-    private var videoPlaceholder: some View {
-        DashboardCard(title: "Incident video") {
-            VStack(spacing: 12) {
-                Image(systemName: "video.fill").font(.system(size: 38)).foregroundStyle(AppTheme.accent)
-                Text(event.videoPath == nil ? "No video attached" : "Video playback coming soon")
-                    .font(.headline)
-                if let path = event.videoPath { Text(path).font(.caption).foregroundStyle(AppTheme.secondaryText) }
-            }.frame(maxWidth: .infinity, minHeight: 130)
+    private var metadataCard: some View {
+        DashboardCard(title: "Incident information") {
+            detailRow("Detected", viewModel.event.detectedObject ?? "Unavailable")
+            detailRow("Camera", viewModel.event.cameraId ?? "Unavailable")
+            detailRow("Side", viewModel.event.side?.rawValue.capitalized ?? "Unavailable")
+            detailRow("Distance", viewModel.event.estimatedDistanceMeters.map { String(format: "%.1f meters", $0) } ?? "Unavailable")
+            detailRow("Confidence", viewModel.event.confidence.map { String(format: "%.0f%%", $0 * 100) } ?? "Unavailable")
+            detailRow("Speed", viewModel.event.speed.map { String(format: "%.1f mph", $0) } ?? "Unavailable")
+            if let latitude = viewModel.event.latitude, let longitude = viewModel.event.longitude {
+                detailRow("Location", String(format: "%.5f, %.5f", latitude, longitude))
+            }
+            if let notes = viewModel.event.notes { Divider(); Text(notes).font(.subheadline).foregroundStyle(AppTheme.secondaryText) }
         }
     }
 
-    private var aiSummaryPlaceholder: some View {
-        DashboardCard(title: "AI summary") {
-            Label("AI incident analysis will appear here.", systemImage: "sparkles")
-                .foregroundStyle(AppTheme.secondaryText)
+    private var analysisCard: some View {
+        DashboardCard(title: "AI incident analysis") {
+            switch viewModel.analysisState {
+            case .notAnalyzed:
+                Text("Analyze Pi-generated event metadata after the incident. AI is not used for realtime safety decisions.").font(.subheadline).foregroundStyle(AppTheme.secondaryText)
+                analyzeButton("Analyze Incident")
+            case .analyzing:
+                HStack { ProgressView(); Text("Analyzing incident…") }
+            case .available:
+                Text(viewModel.event.aiSummary ?? "Analysis unavailable.").font(.subheadline)
+                analyzeButton("Analyze Again")
+            case .failed:
+                Label(viewModel.analysisError ?? "Analysis failed.", systemImage: "exclamationmark.triangle.fill").font(.subheadline).foregroundStyle(AppTheme.danger)
+                analyzeButton("Try Again")
+            }
         }
+    }
+
+    private func analyzeButton(_ title: String) -> some View {
+        Button(title) { Task { await viewModel.analyze() } }.buttonStyle(.borderedProminent).tint(AppTheme.accent)
     }
 
     private var coordinate: CLLocationCoordinate2D? {
-        guard let latitude = event.latitude, let longitude = event.longitude else { return nil }
+        guard let latitude = viewModel.event.latitude, let longitude = viewModel.event.longitude else { return nil }
         return CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
     }
 
     private func detailRow(_ label: String, _ value: String) -> some View {
-        HStack(alignment: .top) {
-            Text(label).foregroundStyle(AppTheme.secondaryText)
-            Spacer()
-            Text(value).multilineTextAlignment(.trailing).fontWeight(.semibold)
-        }.font(.subheadline)
+        HStack(alignment: .top) { Text(label).foregroundStyle(AppTheme.secondaryText); Spacer(); Text(value).multilineTextAlignment(.trailing).fontWeight(.semibold) }.font(.subheadline)
     }
 }

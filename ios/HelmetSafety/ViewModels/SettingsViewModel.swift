@@ -5,5 +5,4 @@ final class SettingsViewModel: ObservableObject {
     @Published var hapticAlerts = true
     @Published var ledAlerts = true
     @Published var voiceAssistant = true
-    @Published var guardianLocationSharing = false
 }
