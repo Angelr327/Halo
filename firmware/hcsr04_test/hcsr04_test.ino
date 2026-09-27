@@ -13,8 +13,8 @@
   Close the Serial Monitor before running the helmet software (only one program
   can use the port), and re-flash helmet_arduino.ino when you're done.
 */
-const uint8_t PIN_TRIG = 7;
-const uint8_t PIN_ECHO = 8;
+const uint8_t PIN_TRIG = 6;
+const uint8_t PIN_ECHO = 7;
 const unsigned long TIMEOUT_US = 25000;   // ~4.3 m; no echo within this = nothing in range
 const int NEAR_CM = 50;
 
