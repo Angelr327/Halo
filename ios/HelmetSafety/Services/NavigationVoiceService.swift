@@ -2,8 +2,18 @@ import AVFoundation
 import Foundation
 
 protocol NavigationVoiceProviding: AnyObject {
-    func speak(_ text: String)
+    func speak(_ text: String, priority: VoicePromptPriority)
     func stop()
+}
+
+enum VoicePromptPriority: Int {
+    case navigation = 0
+    case hazard = 1
+    case criticalHazard = 2
+}
+
+extension NavigationVoiceProviding {
+    func speak(_ text: String) { speak(text, priority: .navigation) }
 }
 
 /// Uses ElevenLabs when an ephemeral/server-issued key is supplied at runtime.
@@ -12,10 +22,15 @@ final class NavigationVoiceService: NSObject, NavigationVoiceProviding, AVAudioP
     private let synthesizer = AVSpeechSynthesizer()
     private var player: AVAudioPlayer?
     private var speechTask: Task<Void, Never>?
+    private var currentPriority: VoicePromptPriority?
 
-    func speak(_ text: String) {
-        stop()
+    func speak(_ text: String, priority: VoicePromptPriority) {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        // Turn prompts never interrupt a safety warning. A new hazard may interrupt
+        // navigation, and a critical warning may interrupt a medium warning.
+        if let currentPriority, currentPriority.rawValue > priority.rawValue { return }
+        stopPlayback()
+        currentPriority = priority
 
         speechTask = Task { [weak self] in
             guard let self else { return }
@@ -35,11 +50,26 @@ final class NavigationVoiceService: NSObject, NavigationVoiceProviding, AVAudioP
     }
 
     func stop() {
+        stopPlayback()
+        currentPriority = nil
+    }
+
+    private func stopPlayback() {
         speechTask?.cancel()
         speechTask = nil
         player?.stop()
         player = nil
         synthesizer.stopSpeaking(at: .immediate)
+    }
+
+    func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
+        currentPriority = nil
+        self.player = nil
+    }
+
+    func audioPlayerDecodeErrorDidOccur(_ player: AVAudioPlayer, error: Error?) {
+        currentPriority = nil
+        self.player = nil
     }
 
     private func fetchElevenLabsSpeech(_ text: String, configuration: ElevenLabsConfiguration) async throws -> Data {
@@ -74,6 +104,13 @@ final class NavigationVoiceService: NSObject, NavigationVoiceProviding, AVAudioP
         utterance.voice = AVSpeechSynthesisVoice(language: Locale.current.language.languageCode?.identifier ?? "en-US")
         utterance.rate = 0.5
         synthesizer.speak(utterance)
+        // AVSpeechSynthesizer does not expose a useful duration up front. Clear the
+        // priority after a conservative window so later navigation can resume.
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(4))
+            guard !Task.isCancelled else { return }
+            self?.currentPriority = nil
+        }
     }
 }
 

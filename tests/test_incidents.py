@@ -34,8 +34,11 @@ def _frame(z):
     return img
 
 
-def run_approach(rec, fire_at=6.0, secs=11.0, fps=15.0, extra_fire_at=None, tid=7):
+def run_approach(rec, fire_at=6.0, secs=None, fps=15.0, extra_fire_at=None, tid=7):
     """A car closing from behind; a HIGH alert fires at `fire_at`."""
+    if secs is None:
+        latest_fire = max(at for at in (fire_at, extra_fire_at) if at is not None)
+        secs = latest_fire + cfg.INCIDENT_POST_S + 1.0
     ids, t = [], 0.0
     while t < secs:
         z = max(1.0, 40 - 3.5 * t)
@@ -63,7 +66,8 @@ def test_high_alert_saves_clip_and_report():
     meta = rec.get(ids[0])
     assert meta["severity"] == "HIGH" and meta["side"] == "behind" and meta["label"] == "car"
     assert meta["clip"] == "clip.mp4" and meta["thumb"] == "thumb.jpg"
-    assert abs(meta["duration_s"] - (cfg.INCIDENT_PRE_S + cfg.INCIDENT_POST_S)) < 0.3, meta["duration_s"]
+    expected_duration = min(cfg.INCIDENT_PRE_S, 6.0) + cfg.INCIDENT_POST_S
+    assert abs(meta["duration_s"] - expected_duration) < 0.3, meta["duration_s"]
     assert meta["min_ttc_s"] is not None and meta["trace"] and meta["analysis_status"] == "not_configured"
     assert "closed fast from directly behind" in meta["local_summary"] and "warned" in meta["local_summary"]
     cap = cv2.VideoCapture(rec.file_path(ids[0], "clip.mp4"))
@@ -81,19 +85,21 @@ def test_high_alert_saves_clip_and_report():
 def test_alerts_during_post_roll_merge_and_cooldown_blocks_repeats():
     d = tempfile.mkdtemp()
     rec = IncidentRecorder(client=None, directory=d)
-    ids = run_approach(rec, fire_at=6.0, extra_fire_at=8.0, secs=13.0)
+    ids = run_approach(rec, fire_at=6.0, extra_fire_at=8.0)
     wait_written(rec)
     assert ids[0] == ids[1], "second alert while recording should join the same incident"
     meta = rec.get(ids[0])
-    assert len(meta["events"]) == 2 and meta["duration_s"] > cfg.INCIDENT_PRE_S + cfg.INCIDENT_POST_S
-    again = rec.trigger(Fire(7, "car", "CENTER", 3, "B", "again", 14.0), 14.0)
+    base_duration = min(cfg.INCIDENT_PRE_S, 6.0) + cfg.INCIDENT_POST_S
+    assert len(meta["events"]) == 2 and meta["duration_s"] > base_duration
+    after_recording = 8.0 + cfg.INCIDENT_POST_S + 2.0
+    again = rec.trigger(Fire(7, "car", "CENTER", 3, "B", "again", after_recording), after_recording)
     assert again is None, "same vehicle inside the cooldown must not open another incident"
-    other = rec.trigger(Fire(8, "car", "LEFT", 3, "L", "close pass", 14.0), 14.0)
+    other = rec.trigger(Fire(8, "car", "LEFT", 3, "L", "close pass", after_recording), after_recording)
     assert other is not None
     # a different vehicle alerting while one is recording gets its own incident afterwards
     rec2 = IncidentRecorder(client=None, directory=tempfile.mkdtemp())
     t = 0.0
-    while t < 16.0:
+    while t < 8.0 + cfg.INCIDENT_POST_S + 2.0:
         z = max(1.0, 40 - 3.5 * t)
         a, b = _track(z, tid=1), _track(z + 3, tid=2)
         if abs(t - 6.0) < 0.03:
@@ -169,7 +175,7 @@ def test_gemini_analysis_is_stored_and_failures_are_reported():
 def test_side_sensor_decides_the_side():
     rec = IncidentRecorder(client=None, directory=tempfile.mkdtemp())
     t, contact = 0.0, None
-    while t < 11.0:
+    while t < 6.0 + cfg.INCIDENT_POST_S + 1.0:
         z = max(1.0, 40 - 3.5 * t)
         tr = _track(z)
         if abs(t - 6.0) < 0.03:

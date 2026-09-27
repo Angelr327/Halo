@@ -39,7 +39,7 @@ final class MapViewModel: ObservableObject {
 
     var routeTimeText: String {
         guard let seconds = navigationState.route?.expectedTravelTime else { return "—" }
-        return "\(max(1, Int((seconds / 60).rounded()))) min"
+        return RouteTimeFormatter.duration(seconds)
     }
 
     func search() async {

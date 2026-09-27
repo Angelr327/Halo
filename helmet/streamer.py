@@ -8,7 +8,7 @@ and only while someone is watching, so it barely touches the detection loop.
   /view        2.5D bird's-eye view (three.js, drawn on the phone from /state)
   /stream.mjpg?camera=front|rear  separate camera previews, without the debug panel
   /state       snapshot feed: server-sent events, one small JSON scene per frame (<= ~15/s)
-  /api/v1/state  the latest snapshot as one plain JSON response (the iOS app polls this)
+  /api/v1/state  the latest snapshot as one plain JSON response (legacy/debug clients)
   /api/v1/incidents                    GET list (newest first) / POST = rider marks an incident
   /api/v1/incidents/<id>               GET one report (meta.json)
   /api/v1/incidents/<id>/clip.mp4      GET the clip (supports Range, for iOS AVPlayer)

@@ -185,7 +185,7 @@ final class RideViewModel: ObservableObject {
 
     var routeDurationText: String {
         guard let seconds = navigation.route?.expectedTravelTime else { return "—" }
-        return "\(max(1, Int((seconds / 60).rounded()))) min"
+        return RouteTimeFormatter.duration(seconds)
     }
 
     var averageSpeedMPH: Double {
