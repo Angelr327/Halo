@@ -70,6 +70,8 @@ def parse_args():
     ap.add_argument("--rear-only", action="store_true", help="with --sim: script only the rear camera")
     ap.add_argument("--agent", action="store_true", help="Gemini tool-calling mode")
     ap.add_argument("--demo-person", action="store_true", help="count people as vehicles (stationary demo)")
+    ap.add_argument("--demo-chair", action="store_true",
+                    help="show front-camera chairs as trees without markers/calibration (visual demo only)")
     ap.add_argument("--model", help="YOLO weights, e.g. yolo26n.pt")
     ap.add_argument("--log", help="write per-frame track metrics to this CSV")
     ap.add_argument("--headless", action="store_true", default=None, help="no OpenCV window (default on a Pi without a desktop)")
@@ -77,6 +79,13 @@ def parse_args():
     ap.add_argument("--stream", type=int, default=None, help="web view port (0 = off; default 8080 on a Pi)")
     ap.add_argument("--camera-source", choices=["auto", "usb", "picamera2"], help="camera type")
     args = ap.parse_args()
+    if args.demo_chair:
+        if args.collision or args.collision_calibration or args.collision_log:
+            ap.error("--demo-chair is separate from the --collision modes")
+        if args.sim or args.video or args.front_video:
+            ap.error("--demo-chair uses live front and rear cameras")
+        if args.front_camera == (cfg.CAMERA_INDEX if args.camera is None else args.camera):
+            ap.error("front and rear camera indices must differ")
     if args.rear_only and (not args.sim or args.collision):
         ap.error("--rear-only goes with --sim, without --collision")
     if args.sim and not args.rear_only:
@@ -116,8 +125,8 @@ def apply_overrides(args):
         cfg.STREAM_PORT = args.stream or None
     if args.camera_source:
         cfg.CAMERA_SOURCE = args.camera_source
-    if args.sim and args.stream is None and not cfg.STREAM_PORT:
-        cfg.STREAM_PORT = 8080                  # the simulator is for the web view: always serve it
+    if (args.sim or args.demo_chair) and args.stream is None and not cfg.STREAM_PORT:
+        cfg.STREAM_PORT = 8080                  # visual demos serve the web view by default
 
 
 def local_ip():
@@ -185,7 +194,7 @@ def main():
         detector = SimDetector(source)
     else:
         source = VideoSource(args.video, realtime=not args.no_realtime, loop=args.loop) if args.video \
-            else RecoveringCamera(args.camera) if args.collision else open_camera(args.camera)
+            else RecoveringCamera(args.camera) if args.collision or args.demo_chair else open_camera(args.camera)
         print("Loading YOLO...")
         detector = VehicleDetector()
     motion, tracker, policy, scene = GlobalMotion(), Tracker(), AlertPolicy(), SceneTrigger()
@@ -193,16 +202,22 @@ def main():
     beeper = Beeper()
     hud = Hud(enabled=not args.no_hud)
     forward = None
-    if args.collision:
-        from .forward import enable_forward
+    if args.collision or args.demo_chair:
         try:
-            source, detector, forward = enable_forward(args, source, detector, hud)
+            if args.demo_chair:
+                from .chair_demo import enable_chair_demo
+                source, detector, forward = enable_chair_demo(args, source, detector)
+            else:
+                from .forward import enable_forward
+                source, detector, forward = enable_forward(args, source, detector, hud)
         except Exception:
             source.release()
             hud.close()
             link.close()
             raise
-        if forward.mode == "marker":
+        if args.demo_chair:
+            print("Front chair demo: no marker or calibration; tree placement is illustrative")
+        elif forward.mode == "marker":
             print("Front collision demo: stationary marked chair, straight approach, look ahead")
         else:
             print("Front warning: camera-only (no calibration): BRAKE when an object ahead is "
@@ -351,6 +366,7 @@ def main():
             fps=st.fps, det_ms=detector.last_ms, link=link, profile=policy.profile_name,
             captions=speaker.captions, scene=getattr(source, "title", None), contacts=fusion.contacts,
             collision=hud.collision,
+            front_demo=forward.snapshot() if args.demo_chair else None,
             incidents={"latest": recorder.latest_id, "recording": recorder.recording,
                        "current": recorder.active_reference}))
 
@@ -475,7 +491,7 @@ def main():
                 recorder.poll(event_t)
                 # A front replay event is not a lost rear frame. Keep the last rear
                 # state while it is fresh; fault handling still clears failed cameras.
-                hud.update(tracker.tracks if args.collision and not st.fault else [],
+                hud.update(tracker.tracks if (args.collision or args.demo_chair) and not st.fault else [],
                            fault=st.fault, extra=fusion.hud_state())
                 publish_snapshot(now)
                 link.tick(st.light if st.light_override is None else st.light_override)

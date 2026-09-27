@@ -14,6 +14,10 @@ test cases and roadmap are in [FRONT_CAMERA_ONLY.md](docs/FRONT_CAMERA_ONLY.md),
 runs both cameras with no hardware. [COLLISION_DEMO.md](docs/COLLISION_DEMO.md) covers an older
 marker mode that measures exact metres but needs calibration. The rear-only commands below work without either.
 
+`--demo-chair` is a visual-only front demo: chairs the front camera sees appear as trees in the
+3D view, with illustrative placement and no BRAKE warning
+(`python -m helmet.main --demo-person --demo-chair --stream 8080`).
+
 ```
 FAST PATH (every frame, ~70-120 ms, no network)
 camera ─► mirror ─► global-motion ─► YOLO ─► tracker ─► TTC / zone ─► policy ─► motors + light + "Truck left!"

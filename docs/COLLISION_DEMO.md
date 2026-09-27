@@ -3,6 +3,10 @@
 > If you don't have time to calibrate, run `--collision` without `--collision-calibration`.
 > That camera-only mode gives the same BRAKE warning with no marker or checkerboard; see
 > [FRONT_CAMERA_ONLY.md](FRONT_CAMERA_ONLY.md). This page covers the marker mode.
+>
+> For a purely visual demo, `python -m helmet.main --demo-person --demo-chair --headless --stream 8080`
+> shows chairs seen by the front camera as trees in the 3D view. Placement is illustrative: no
+> measured range and no BRAKE warning.
 
 `--collision --collision-calibration FILE` runs both helmet cameras. It detects a chair, pairs
 it with a known-size ArUco marker, estimates your approach speed to that stationary target, and

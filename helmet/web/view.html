@@ -655,8 +655,9 @@ let last = null, lastMsg = 0, fps = 0;
 function onState(data) {
   last = data; lastMsg = performance.now();
   const range = data.view_range_m || {};
-  if (Boolean(data.collision) !== forwardView || (range.behind && (range.behind !== viewBehind || range.ahead !== viewAhead))) {
-    forwardView = Boolean(data.collision);
+  const forward = Boolean(data.collision || data.front_demo);
+  if (forward !== forwardView || (range.behind && (range.behind !== viewBehind || range.ahead !== viewAhead))) {
+    forwardView = forward;
     if (range.behind) { viewBehind = range.behind; viewAhead = range.ahead; }
     setRange(); placeCamera();
   }
@@ -696,6 +697,10 @@ function onState(data) {
     cap.classList.remove('hidden');
   } else cap.classList.add('hidden');
   const lines = [];
+  if (data.front_demo) {
+    lines.push('<b>CHAIR DEMO</b> &middot; chairs shown as trees &middot; placement is illustrative');
+    lines.push(data.front_demo.available ? data.front_demo.status : 'Front detection unavailable');
+  }
   if (data.collision) lines.push(data.collision.mode === 'camera-only'
     ? "<b>FRONT</b> &middot; camera-only, no calibration &middot; chairs shown as trees &middot; look where you're going"
     : '<b>FRONT DEMO</b> &middot; detected chair shown as tree &middot; straight approach, look ahead');
@@ -790,7 +795,8 @@ function frame() {
     for (const m of c.mats) m.opacity = c.fade;
     c.glowMat.color.setHex(TIER_HEX[Math.max(tier, 1)]);
     c.glowMat.opacity = c.fade * (tier >= 3 ? (blinkOn ? 0.95 : 0.35) : tier === 2 ? 0.6 : 0);
-    const text = d.pinned ? (d.ttc != null ? `${d.ttc.toFixed(1)} s` : `${Math.round(d.source === 'front' ? viewAhead : viewBehind)}+ m`)
+    const text = d.placement === 'illustrative' ? 'chair · demo'
+      : d.pinned ? (d.ttc != null ? `${d.ttc.toFixed(1)} s` : `${Math.round(d.source === 'front' ? viewAhead : viewBehind)}+ m`)
       : d.source === 'front' ? (tier >= 2 && d.ttc != null ? `${d.label} · ${d.ttc.toFixed(1)} s`
         : `${d.label} · ${d.approx ? '~' : ''}${Math.abs(d.z).toFixed(1)} m ahead`)
       : d.measured != null ? `${d.measured.toFixed(2)} m gap`     // side sensor: a real measurement
