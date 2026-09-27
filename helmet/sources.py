@@ -3,6 +3,8 @@
 LiveCamera   - USB webcam. Background thread keeps ONLY the newest frame, so a slow
                detector never processes stale frames (OpenCV otherwise queues them).
 PiCamera     - Raspberry Pi camera module (Picamera2), same newest-frame behaviour.
+Both can be mounted upside down (rotate_180): the Pi camera flips in hardware (libcamera
+transform, no CPU), a USB camera with cv2.rotate. Frames come out the right way up.
 open_camera  - picks one according to cfg.CAMERA_SOURCE.
 VideoSource  - recorded footage. t is VIDEO time, so TTC math is right even if the
                laptop is slower than real time. realtime=True skips frames to keep pace.
@@ -19,8 +21,10 @@ from . import config as cfg
 class LiveCamera:
     is_live = True
 
-    def __init__(self, index=None):
+    def __init__(self, index=None, rotate_180=None):
         self.index = cfg.CAMERA_INDEX if index is None else index
+        self.rotate_180 = cfg.CAMERA_ROTATE_180 if rotate_180 is None else rotate_180
+        self._sw_rotate = self.rotate_180          # PiCamera turns this off: it rotates in hardware
         self._cond = threading.Condition()
         self._frame, self._t, self._seq = None, 0.0, 0
         self._last_read_seq = 0
@@ -61,6 +65,8 @@ class LiveCamera:
         while self._running:
             ok, frame = self._grab()
             if ok and frame is not None:
+                if self._sw_rotate:
+                    frame = cv2.rotate(frame, cv2.ROTATE_180)
                 fails = 0
                 with self._cond:
                     self._frame, self._t = frame, time.monotonic()
@@ -163,11 +169,19 @@ class PiCamera(LiveCamera):
 
     def _open(self):
         from picamera2 import Picamera2
-        self.cam = Picamera2()
+        self.cam = Picamera2(self.index)
+        extra = {}
+        if self.rotate_180:
+            try:
+                from libcamera import Transform
+                extra["transform"] = Transform(hflip=1, vflip=1)   # 180 deg, done by the camera: free
+                self._sw_rotate = False
+            except Exception:
+                self._sw_rotate = True                            # fall back to cv2.rotate
         conf = self.cam.create_video_configuration(
             main={"size": (cfg.CAPTURE_WIDTH, cfg.CAPTURE_HEIGHT), "format": "RGB888"},  # RGB888 = BGR bytes = OpenCV order
             buffer_count=2,
-            controls={"FrameRate": float(cfg.CAPTURE_FPS)})
+            controls={"FrameRate": float(cfg.CAPTURE_FPS)}, **extra)
         self.cam.configure(conf)
         self.cam.start()
         if cfg.DISABLE_AUTOFOCUS:
@@ -209,8 +223,9 @@ def _pi_camera_present():
         return False
 
 
-def open_camera(index=None):
+def open_camera(index=None, rotate_180=None):
+    """The rear camera by default; pass index/rotate_180 for another (e.g. the front camera)."""
     src = cfg.CAMERA_SOURCE
     if src == "picamera2" or (src == "auto" and _pi_camera_present()):
-        return PiCamera(index)
-    return LiveCamera(index)
+        return PiCamera(index, rotate_180)
+    return LiveCamera(index, rotate_180)

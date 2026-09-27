@@ -12,8 +12,8 @@
   a time with a quiet gap to reduce interference. The on-board LED (pin 13)
   lights when either sensor sees something closer than 50 cm.
   Close the Serial Monitor before running the helmet software (only one program
-  can use the port). Before re-flashing helmet_arduino.ino, restore its wiring:
-  it uses different sonar pins and assigns D10/D11 to the right motor/buzzer.
+  can use the port). helmet_arduino.ino uses the same sensor pins, so no rewiring
+  is needed to switch back to it.
 */
 const uint8_t NUM_SENSORS = 2;
 const uint8_t PIN_TRIG[NUM_SENSORS] = {7, 11};  // left, right

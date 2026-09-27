@@ -21,12 +21,16 @@ IS_PI = _is_raspberry_pi()        # Pi-friendly defaults below switch on automat
 
 # ---------------------------------------------------------------- input
 CAMERA_SOURCE = "auto"            # [restart] "auto" (Pi camera if present, else USB) | "usb" | "picamera2"
-CAMERA_INDEX = 0                  # [restart]
+CAMERA_INDEX = 0                  # [restart] which camera is the REAR one: Pi camera number (0/1 = CSI port) or USB index
+CAMERA_ROTATE_180 = True          # [restart] rear camera mounted upside down (cable routed down the back of the helmet)
+FRONT_CAMERA_INDEX = 1            # [restart] front camera (riding conditions): the other CSI port
+FRONT_CAMERA_ROTATE_180 = False   # [restart] front camera is mounted the normal way up
 CAPTURE_WIDTH = 640               # [restart]
 CAPTURE_HEIGHT = 480              # [restart]
 CAPTURE_FPS = 30                  # [restart]
 DISABLE_AUTOFOCUS = True          # [restart] C920 focus "breathing" changes apparent size -> fake TTC
-MIRROR_VIEW = True                # rear camera: flip so image-left == rider's LEFT (verify: calibration step 1)
+MIRROR_VIEW = True                # rear camera: flip so image-left == rider's LEFT (verify: calibration step 1).
+                                  # Applied after CAMERA_ROTATE_180, so set both from how it's mounted
 CAMERA_TIMEOUT_S = 1.0            # no new frame for this long -> CAMERA FAULT
 
 # ---------------------------------------------------------------- detector
@@ -148,8 +152,8 @@ SONAR_MAX_CM = 300                # ultrasonic readings beyond this are treated 
 
 # ---------------------------------------------------------------- ultrasonic fusion (side sensors)
 # Which sensors are fitted: name -> (side, degrees angled backward from pointing straight out).
-# Names match the firmware (SL = left, SR = right). Add "SR": ("RIGHT", 5.0) when it's wired.
-SONAR_MOUNT = {"SL": ("LEFT", 5.0)}
+# Names match the firmware (SL = left, SR = right). Remove one if it isn't wired.
+SONAR_MOUNT = {"SL": ("LEFT", 5.0), "SR": ("RIGHT", 5.0)}
 SONAR_OFFSET_M = 0.12             # sensor's distance from the helmet centreline
 SONAR_MIN_M = 0.05
 SONAR_STATIC_S = 3.0              # an echo that hasn't moved this long is background (wall, backpack)

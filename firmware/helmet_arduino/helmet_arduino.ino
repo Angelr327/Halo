@@ -4,11 +4,12 @@
 
   Wiring (see README "Wiring (Arduino Uno + Pi)"). Put 5V and GND on the breadboard rails.
     Left vibration motor   D5 -> 1k -> NPN base (or module IN)   motor between 5V and collector, diode across it
-    Right vibration motor  D10 -> same
-    Left buzzer            D9  (3-pin module: I/O pin; bare buzzer: through an NPN like the motors)
-    Right buzzer           D11
-    Ultrasonic SL (left side, pointing out ~5 deg back)   TRIG D6   ECHO D7
-    Ultrasonic SR (right side, pointing out ~5 deg back)  TRIG D8   ECHO D12
+    Right vibration motor  D9 -> same
+    Left buzzer            D4  (3-pin module: I/O pin; bare buzzer: through an NPN like the motors)
+    Right buzzer           D12
+    Ultrasonic SL (left side, pointing out ~5 deg back)   TRIG D7   ECHO D6
+    Ultrasonic SR (right side, pointing out ~5 deg back)  TRIG D11  ECHO D10
+      (matches the team's wiring and firmware/hcsr04_test, so the test and helmet sketches agree)
     Ultrasonic BL (back, left of centre)     TRIG A0   ECHO A1
     Ultrasonic BR (back, right of centre)    TRIG A2   ECHO A3
       (only sensors marked true in SONAR_FITTED are pinged; the rest report -1)
@@ -34,21 +35,21 @@
 
 // ------------------------------------------------------------------ pins & settings
 const uint8_t PIN_MOTOR_L = 5;
-const uint8_t PIN_MOTOR_R = 10;          // Timer1 PWM: unaffected by tone() for passive buzzers
+const uint8_t PIN_MOTOR_R = 9;           // Timer1 PWM: unaffected by tone() for passive buzzers
 const uint8_t PIN_PIXELS  = 2;
 const uint8_t PIN_BUTTON  = 3;
 const uint8_t PIN_STATUS  = LED_BUILTIN;   // mirrors the rear light: test without the strip
-const uint8_t PIN_BUZZ_L  = 9;
-const uint8_t PIN_BUZZ_R  = 11;
+const uint8_t PIN_BUZZ_L  = 4;
+const uint8_t PIN_BUZZ_R  = 12;
 const bool    BUZZER_PASSIVE = false;       // true for bare passive buzzers (need a tone; Uno plays one at a time)
 const uint16_t BUZZ_HZ    = 2300;
 const uint8_t BUZZ_MIN_LEVEL = 3;           // buzzers join STRONG (3) and FAULT (4) patterns only
 
 // Ultrasonic sensors (HC-SR04), pinged one at a time so they don't hear each other's echoes
 const uint8_t NUM_SONAR = 4;
-const uint8_t SONAR_TRIG[NUM_SONAR] = {6, 8, A0, A2};    // SL, SR, BL, BR
-const uint8_t SONAR_ECHO[NUM_SONAR] = {7, 12, A1, A3};
-const bool    SONAR_FITTED[NUM_SONAR] = {true, false, false, false};  // set true as you wire each one
+const uint8_t SONAR_TRIG[NUM_SONAR] = {7, 11, A0, A2};   // SL, SR, BL, BR
+const uint8_t SONAR_ECHO[NUM_SONAR] = {6, 10, A1, A3};
+const bool    SONAR_FITTED[NUM_SONAR] = {true, true, false, false};   // set true as you wire each one
 const unsigned long SONAR_TIMEOUT_US = 18000;   // ~3 m round trip; further = no echo
 const unsigned long SONAR_GAP_MS     = 30;      // one ping every 30 ms, shared by the fitted sensors
 const uint8_t NUM_PIXELS  = 8;
