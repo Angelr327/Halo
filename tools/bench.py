@@ -212,8 +212,15 @@ class _Grabber:
 
 def _open_csi(num, model):
     from picamera2 import Picamera2
-    role, rot = ("rear", cfg.CAMERA_ROTATE_180) if num == cfg.CAMERA_INDEX else \
-        ("front", cfg.FRONT_CAMERA_ROTATE_180) if num == cfg.FRONT_CAMERA_INDEX else ("?", False)
+    from helmet.sources import pi_camera_num
+    rear, front = cfg.CAMERA_INDEX, cfg.FRONT_CAMERA_INDEX
+    try:                                                      # connectors, when set, beat numbers
+        rear = pi_camera_num(cfg.CAMERA_PORT) if cfg.CAMERA_PORT else rear
+        front = pi_camera_num(cfg.FRONT_CAMERA_PORT) if cfg.FRONT_CAMERA_PORT else front
+    except RuntimeError as e:
+        print(f"  note: {e}")
+    role, rot = ("rear", cfg.CAMERA_ROTATE_180) if num == rear else \
+        ("front", cfg.FRONT_CAMERA_ROTATE_180) if num == front else ("?", False)
     extra = {}
     if rot:
         from libcamera import Transform
