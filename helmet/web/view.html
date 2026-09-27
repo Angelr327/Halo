@@ -32,7 +32,7 @@
   .edge { position: fixed; pointer-events: none; opacity: 0; transition: opacity 0.12s; z-index: 2; }
   .edge.left { left: 0; top: 0; bottom: 0; width: 24vw; background: linear-gradient(90deg, var(--c), transparent); }
   .edge.right { right: 0; top: 0; bottom: 0; width: 24vw; background: linear-gradient(270deg, var(--c), transparent); }
-  .edge.top { left: 0; right: 0; top: 0; height: 30vh; background: linear-gradient(180deg, var(--c), transparent); }
+  .edge.bottom { left: 0; right: 0; bottom: 0; height: 30vh; background: linear-gradient(0deg, var(--c), transparent); }
 
   #banner { position: fixed; top: 58px; left: 50%; transform: translateX(-50%); z-index: 6;
     display: flex; align-items: center; gap: 14px; padding: 12px 20px 12px 14px; border-radius: 18px;
@@ -95,7 +95,7 @@
 <canvas id="c"></canvas>
 <div id="edgeL" class="edge left"></div>
 <div id="edgeR" class="edge right"></div>
-<div id="edgeB" class="edge top"></div>
+<div id="edgeB" class="edge bottom"></div>
 
 <header>
   <div class="brand">BLINDSPOT</div>
@@ -147,10 +147,10 @@
 import * as THREE from '/static/three.module.min.js';
 
 // ------------------------------------------------------------------ constants
-// The view is a 3D rear-view mirror: the camera sits ahead of the rider looking back, so near
-// cars are big, far cars small, and (like any mirror) the rider's left is on the screen's left.
-// World units are metres, z = metres behind the rider. A camera looking back sees world -x on
-// its right, so the rider's lateral offset maps to world x = -lat (W below).
+// The view is a chase view: the camera sits behind and above the rider looking forward, so the
+// rider heads up the screen (north), front-camera objects are ahead of the bike and rear traffic
+// comes up from the bottom (south). World units are metres, z = metres behind the rider
+// (negative = ahead), x = metres to the rider's right (W below).
 const TIER_HEX = { 0: 0xd4d9e0, 1: 0xf2c94c, 2: 0xff8a1f, 3: 0xff3b30 };
 const TIER_CSS = { 1: 'var(--yellow)', 2: 'var(--orange)', 3: 'var(--red)' };
 const BLINK_HZ = 4;                      // same as the OLED's HIGH blink
@@ -158,7 +158,9 @@ const ROAD_HALF = 6.5;
 const qs = new URLSearchParams(location.search);
 const tok = qs.get('t');
 const $ = (id) => document.getElementById(id);
-const W = (lat) => -lat;                 // rider's lateral offset (m, + = right) -> world x
+const W = (lat) => lat;                  // rider's lateral offset (m, + = right) -> world x
+let camOn = true;                        // camera tiles shown (they take screen space; see placeCamera)
+let viewBehind = 12, viewAhead = 8;      // drawn range, from the snapshot's view_range_m
 
 // ------------------------------------------------------------------ renderer / camera
 const canvas = $('c');
@@ -166,33 +168,44 @@ const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x0b0e13);
-scene.fog = new THREE.Fog(0x0b0e13, 34, 62);
+scene.fog = new THREE.Fog(0x0b0e13, 40, 70);
 const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 200);
 let forwardView = false;
 
+// Frame the road from `ahead` in front of the rider to viewBehind behind: pick the tilt, then
+// solve for the camera height and position that put those two lines on chosen screen rows,
+// clear of the overlays (phones: camera tiles and legend at the bottom; laptops: banner and
+// legend at the top, camera tiles at the right, so the road shifts left while they show).
 function placeCamera() {
   const w = window.innerWidth, h = window.innerHeight;
   renderer.setSize(w, h, false);
-  camera.aspect = w / h;
-  if (forwardView && camera.aspect < 0.8) {     // phone: aim 6 m ahead so what's in front of you
-    camera.fov = 65;                            // clears the legend and camera tiles at the bottom
-    camera.position.set(0, 19, -25); camera.lookAt(0, 0, -6);
-  } else if (forwardView) {
-    camera.fov = 55;
-    camera.position.set(0, 19, -19); camera.lookAt(0, 0, 0);
-  } else if (camera.aspect < 0.8) {             // phone, portrait: higher, to fit the road width
-    camera.fov = 60; camera.position.set(0, 11.5, -9.5); camera.lookAt(0, 0, 7.5);
-  } else {                               // laptop / landscape
-    camera.fov = 46; camera.position.set(0, 7.2, -8.2); camera.lookAt(0, 0, 6.5);
-  }
+  const portrait = w / h < 0.8;
+  const ahead = forwardView ? viewAhead : 3;             // rear camera only: just a little road ahead
+  const top = portrait ? 135 : 175;                      // screen row for the far edge ahead (below the banner)
+  const bottom = portrait ? (camOn ? 0.585 * h : h - 150) : h - 12;   // ... and for the far edge behind
+  const cx = !portrait && camOn ? 0.4 : 0.5;
+  const pitch = THREE.MathUtils.degToRad(portrait ? 58 : 48);   // tilt below horizontal
+  camera.fov = portrait ? 60 : 45;
+  const fullW = w * 2 * Math.max(cx, 1 - cx);
+  camera.aspect = fullW / h;
+  const ta = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
+  const below = (y) => pitch + Math.atan((y - h / 2) / (h / 2) * ta);   // ray angle below horizontal for row y
+  const cot = (a) => 1 / Math.tan(a);
+  const height = (ahead + viewBehind) / (cot(below(top)) - cot(below(bottom)));
+  const z = height * cot(below(top)) - ahead;
+  camera.position.set(0, height, z);
+  camera.lookAt(0, 0, z - height * cot(pitch));
+  camera.setViewOffset(fullW, h, fullW / 2 - cx * w, 0, w, h);
   camera.updateProjectionMatrix();
+  const toAhead = camera.position.distanceTo(new THREE.Vector3(0, 0, -ahead));
+  scene.fog.near = toAhead + 3; scene.fog.far = toAhead + 30;   // fade the road just past the range
 }
 window.addEventListener('resize', placeCamera);
 placeCamera();
 
 scene.add(new THREE.HemisphereLight(0xffffff, 0x1b2029, 1.15));
 const sun = new THREE.DirectionalLight(0xffffff, 1.5);
-sun.position.set(5, 14, -10);
+sun.position.set(-5, 14, 10);                  // from behind the camera: lights what it sees
 scene.add(sun);
 
 // ------------------------------------------------------------------ small helpers
@@ -226,7 +239,7 @@ function groundText(text, x, z, size, color, opacity) {
   });
   const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity, depthWrite: false });
   const m = flat(size * 4, size, mat, x, z, 0.012);
-  m.rotation.set(-Math.PI / 2, 0, Math.PI);   // readable from a camera looking back down the road
+  m.rotation.set(-Math.PI / 2, 0, 0);         // readable from the chase camera looking forward
   return m;
 }
 function cylinder(a, b, r, mat) {                         // a rod between two points
@@ -243,27 +256,29 @@ flat(80, 100, new THREE.MeshStandardMaterial({ color: 0x0f1319, roughness: 1 }),
 flat(ROAD_HALF * 2, 110, new THREE.MeshStandardMaterial({ color: 0x1a2029, roughness: 0.95 }), 0, 20, 0.002);
 const edgeMat = new THREE.MeshBasicMaterial({ color: 0x3a4452 });
 for (const x of [-ROAD_HALF, ROAD_HALF]) flat(0.08, 90, edgeMat, x, 30, 0.006);
+// Distance rings every 5 m behind and ahead; setRange() shows the ones inside the drawn range.
 const ringMat = new THREE.MeshBasicMaterial({ color: 0x2a323d });
-for (const z of [5, 10, 20, 30]) {
-  flat(ROAD_HALF * 2, 0.05, ringMat, 0, z, 0.006);
+const rings = [];
+for (const z of [-15, -10, -5, 5, 10, 15, 20, 25, 30]) {
+  const line = flat(ROAD_HALF * 2, 0.05, ringMat, 0, z, 0.006);
   const tex = canvasTexture(256, 96, (g, w, h) => {       // upright label: readable at any distance
     g.fillStyle = '#7d8796'; g.font = '600 56px system-ui, sans-serif';
-    g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(`${z} m`, w / 2, h / 2);
+    g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(`${Math.abs(z)} m`, w / 2, h / 2);
   });
   const lab = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, opacity: 0.75, depthWrite: false }));
-  const sz = 0.45 + z * 0.022;                            // grows with distance so far labels stay legible
-  lab.scale.set(sz * 2.67, sz, 1);
-  lab.position.set(W(4.3), sz / 2 + 0.05, z);             // inside the road: visible on a phone too
+  lab.scale.set(0.6 * 2.67, 0.6, 1);
+  lab.position.set(W(4.3), 0.35, z);                      // inside the road: visible on a phone too
   scene.add(lab);
+  rings.push({ z, line, lab });
 }
 
 // Your lane (bike + margin) and the two blind-spot zones. They light up from the SAME
 // state the OLED shows (snapshot "hud"), so the phone, the OLED and the buzz always agree.
 let corridorHalf = 0.6;
 const laneMat = new THREE.MeshBasicMaterial({ color: 0x3ea6ff, transparent: true, opacity: 0.07, depthWrite: false });
-const lane = flat(corridorHalf * 2, 60, laneMat, 0, 30, 0.008);
+const lane = flat(corridorHalf * 2, 1, laneMat, 0, 0, 0.008);       // length set by setRange()
 const laneEdgeMat = new THREE.MeshBasicMaterial({ color: 0x3ea6ff, transparent: true, opacity: 0.35 });
-const laneEdges = [-1, 1].map((s) => flat(0.04, 60, laneEdgeMat, s * corridorHalf, 30, 0.009));
+const laneEdges = [-1, 1].map((s) => flat(0.04, 1, laneEdgeMat, s * corridorHalf, 0, 0.009));
 
 const ZONE_W = 3.2, ZONE_Z0 = -1.5, ZONE_Z1 = 6.0;
 const zones = {};
@@ -279,6 +294,12 @@ for (const [name, s] of [['LEFT', -1], ['RIGHT', 1]]) {
   groundText('BLIND SPOT', x, 3.2, 0.42, '#8a94a3', 0.35);
   zones[name] = { fill, outline };
 }
+function setRange() {                     // your lane and the rings cover exactly the drawn range
+  const ahead = forwardView ? viewAhead : 3;
+  for (const m of [lane, ...laneEdges]) { m.scale.y = ahead + viewBehind; m.position.z = (viewBehind - ahead) / 2; }
+  for (const r of rings) r.line.visible = r.lab.visible = r.z > 0 ? r.z <= viewBehind : forwardView && -r.z <= viewAhead;
+}
+setRange();
 function setCorridor(half) {
   if (!half || Math.abs(half - corridorHalf) < 1e-3) return;
   corridorHalf = half;
@@ -339,6 +360,7 @@ const TAIL = new THREE.BoxGeometry(0.42, 0.1, 0.04);
 const glassMat = new THREE.MeshStandardMaterial({ color: 0x18202b, roughness: 0.2, metalness: 0.3 });
 const tyreMat = new THREE.MeshStandardMaterial({ color: 0x0d1015, roughness: 0.9 });
 const tailMat = new THREE.MeshStandardMaterial({ color: 0xfff4d6, emissive: 0xfff0c8, emissiveIntensity: 1.0 });
+const rearLightMat = new THREE.MeshStandardMaterial({ color: 0xff3b30, emissive: 0xc0141a, emissiveIntensity: 0.9 });
 
 function makeLabel() {
   const cv = document.createElement('canvas');
@@ -391,9 +413,9 @@ function setRibbon(mesh, x0, z0, x1, z1, w) {
 function makeCar() {
   const group = new THREE.Group();
   const bodyMat = new THREE.MeshStandardMaterial({ color: TIER_HEX[0], roughness: 0.5, metalness: 0.15, transparent: true });
-  const glass = glassMat.clone(), tyre = tyreMat.clone(), tail = tailMat.clone();
-  const mats = [bodyMat, glass, tyre, tail];                // per car, so the whole car fades in/out
-  for (const m of [glass, tyre, tail]) m.transparent = true;
+  const glass = glassMat.clone(), tyre = tyreMat.clone(), tail = tailMat.clone(), rear = rearLightMat.clone();
+  const mats = [bodyMat, glass, tyre, tail, rear];          // per car, so the whole car fades in/out
+  for (const m of [glass, tyre, tail, rear]) m.transparent = true;
   group.add(new THREE.Mesh(CAR_BODY, bodyMat));
   group.add(new THREE.Mesh(CAR_CABIN, glass));
   const roof = new THREE.Mesh(CAR_ROOF, bodyMat);
@@ -404,7 +426,9 @@ function makeCar() {
   }
   for (const x of [-0.66, 0.66]) {
     const t = new THREE.Mesh(TAIL, tail);
-    t.position.set(x, 0.66, -2.25); group.add(t);         // headlights: the mirror sees car fronts
+    t.position.set(x, 0.66, -2.25); group.add(t);         // headlights (cars face north, like you)
+    const r = new THREE.Mesh(TAIL, rear);
+    r.position.set(x, 0.66, 2.25); group.add(r);          // tail lights: what the chase camera sees
   }
   const shadow = new THREE.Mesh(new THREE.PlaneGeometry(2.5, 5.2),
     new THREE.MeshBasicMaterial({ map: SHADOW_TEX, transparent: true, depthWrite: false }));
@@ -615,12 +639,23 @@ const cars = new Map();
 let last = null, lastMsg = 0, fps = 0;
 function onState(data) {
   last = data; lastMsg = performance.now();
-  if (Boolean(data.collision) !== forwardView) { forwardView = Boolean(data.collision); placeCamera(); }
+  const range = data.view_range_m || {};
+  if (Boolean(data.collision) !== forwardView || (range.behind && (range.behind !== viewBehind || range.ahead !== viewAhead))) {
+    forwardView = Boolean(data.collision);
+    if (range.behind) { viewBehind = range.behind; viewAhead = range.ahead; }
+    setRange(); placeCamera();
+  }
   setCorridor(data.corridor_half_m);
   sonarMount = data.sonar_mount || {};
   for (const [k, arc] of Object.entries(sonarArcs)) if (!(data.sonar && k in data.sonar)) arc.mesh.visible = false;
   const seen = new Set();
-  for (const d of [...data.cars, ...(data.front_obstacles || [])]) {
+  for (const raw of [...data.cars, ...(data.front_obstacles || [])]) {
+    // Past the drawn range one camera's distance is too rough: hide quiet objects, and pin
+    // alerting ones at the edge (their label shows time to contact, not a made-up distance).
+    const front = raw.source === 'front';
+    const inRange = front ? -raw.z <= viewAhead : raw.z <= viewBehind;
+    if (!inRange && !(raw.tier >= 1)) continue;
+    const d = inRange ? raw : { ...raw, z: front ? -viewAhead : viewBehind, pinned: true };
     seen.add(d.id);
     let c = cars.get(d.id);
     if (c && c.kind !== kindOf(d)) { disposeCar(c); c = null; }       // tracker changed its mind on the class
@@ -667,7 +702,6 @@ function connect() {
 connect();
 
 // ------------------------------------------------------------------ camera previews
-let camOn = true;
 const cameraRetries = {};
 function openCamera(side) {
   const img = $(side + 'CamImg');
@@ -694,6 +728,7 @@ function setCam(on) {
   }
   $('camBtn').textContent = on ? 'Hide cameras' : 'Show cameras';
   $('camBtn').setAttribute('aria-expanded', String(on));
+  placeCamera();                                  // the tiles free or take screen space
 }
 $('camBtn').addEventListener('click', () => setCam(!camOn));
 document.addEventListener('visibilitychange', () => setCam(camOn));
@@ -740,7 +775,8 @@ function frame() {
     for (const m of c.mats) m.opacity = c.fade;
     c.glowMat.color.setHex(TIER_HEX[Math.max(tier, 1)]);
     c.glowMat.opacity = c.fade * (tier >= 3 ? (blinkOn ? 0.95 : 0.35) : tier === 2 ? 0.6 : 0);
-    const text = d.source === 'front' ? (tier >= 2 && d.ttc != null ? `${d.label} · ${d.ttc.toFixed(1)} s`
+    const text = d.pinned ? (d.ttc != null ? `${d.ttc.toFixed(1)} s` : `${Math.round(d.source === 'front' ? viewAhead : viewBehind)}+ m`)
+      : d.source === 'front' ? (tier >= 2 && d.ttc != null ? `${d.label} · ${d.ttc.toFixed(1)} s`
         : `${d.label} · ${d.approx ? '~' : ''}${Math.abs(d.z).toFixed(1)} m ahead`)
       : d.measured != null ? `${d.measured.toFixed(2)} m gap`     // side sensor: a real measurement
       : tier >= 1 && d.ttc != null && !d.alongside ? `${d.ttc.toFixed(1)} s`

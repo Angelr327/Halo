@@ -122,6 +122,7 @@ class OutputTests(unittest.TestCase):
         self.assertEqual((chair["display_asset"], chair["tier"], chair["approx"]), ("tree", 3, True))
         self.assertEqual((person["label"], person["display_asset"], person["z"]), ("person", None, -6.0))
         self.assertEqual(s["collision"]["state"], "BRAKE")
+        self.assertEqual(s["view_range_m"], {"behind": cfg.VIEW_BEHIND_M, "ahead": cfg.VIEW_AHEAD_M})
         json.dumps(s, allow_nan=False)
 
     def test_oled_brake_and_stale_feed_clears_objects(self):
