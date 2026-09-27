@@ -6,6 +6,7 @@ and only while someone is watching, so it barely touches the detection loop.
 
   /            debug overlay + buttons
   /view        2.5D bird's-eye view (three.js, drawn on the phone from /state)
+  /stream.mjpg?camera=front|rear  separate camera previews, without the debug panel
   /state       snapshot feed: server-sent events, one small JSON scene per frame (<= ~15/s)
   /api/v1/state  the latest snapshot as one plain JSON response (the iOS app polls this)
   /api/v1/incidents                    GET list (newest first) / POST = rider marks an incident
@@ -24,6 +25,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
 import cv2
+import numpy as np
 
 from . import config as cfg
 
@@ -59,17 +61,37 @@ def _with_urls(meta):
                 thumb_url=f"{base}/thumb.jpg" if meta.get("thumb") else None)
 
 
+class _VideoFeed:
+    def __init__(self, camera=False):
+        self.latest = (None, 0.0)
+        self.jpeg, self.seq, self.clients = None, 0, 0
+        self.camera = camera
+        self.unavailable = "Camera unavailable"
+        self.placeholder = None
+        self.encoded_image = None
+
+    def image(self):
+        img, captured_at = self.latest
+        if self.camera and (img is None or time.monotonic() - captured_at > cfg.CAMERA_TIMEOUT_S):
+            if self.placeholder is None or self.placeholder[0] != self.unavailable:
+                img = np.full((360, 480, 3), (19, 14, 11), np.uint8)
+                size = cv2.getTextSize(self.unavailable, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 1)[0]
+                cv2.putText(img, self.unavailable, ((480 - size[0]) // 2, 185),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.55, (163, 148, 138), 1, cv2.LINE_AA)
+                self.placeholder = (self.unavailable, img)
+            return self.placeholder[1]
+        return img
+
+
 class Streamer:
     def __init__(self, port):
         self.keys = queue.Queue()
         self._state, self._state_seq = None, 0
         self.incidents = None                    # IncidentRecorder, set by main.py
         self._state_cond = threading.Condition()
-        self._latest = None
-        self._jpeg = None
-        self._jpeg_seq = 0
+        self._feeds = {"debug": _VideoFeed(), "front": _VideoFeed(camera=True), "rear": _VideoFeed(camera=True)}
         self._cond = threading.Condition()
-        self.clients = 0
+        self._stop = threading.Event()
         self.port = port
         streamer = self
 
@@ -107,11 +129,16 @@ class Streamer:
                         self.send_response(403)
                         self.end_headers()
                         return
+                    camera = q.get("camera", ["debug"])[0]
+                    if camera not in streamer._feeds:
+                        self.send_response(404)
+                        self.end_headers()
+                        return
                     self.send_response(200)
                     self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
                     self.send_header("Cache-Control", "no-cache")
                     self.end_headers()
-                    streamer._serve_stream(self.wfile)
+                    streamer._serve_stream(self.wfile, camera)
                 elif url.path == "/view":
                     self._file(os.path.join(WEB_DIR, "view.html"), cache=False)
                 elif url.path.startswith("/static/"):
@@ -255,11 +282,18 @@ class Streamer:
         self.server = ThreadingHTTPServer(("0.0.0.0", port), Handler)
         self.server.daemon_threads = True
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
-        threading.Thread(target=self._encoder, daemon=True).start()
+        self._encoder_thread = threading.Thread(target=self._encoder, daemon=True)
+        self._encoder_thread.start()
 
     def publish(self, canvas):
         """Called by the main loop with each rendered frame (no copy, no encoding here)."""
-        self._latest = canvas
+        self._feeds["debug"].latest = (canvas, time.monotonic())
+
+    def publish_camera(self, camera, frame, captured_at=None, unavailable="Camera unavailable"):
+        """Share an existing capture; previews never acquire the rear/collision cameras."""
+        feed = self._feeds[camera]
+        feed.unavailable = unavailable
+        feed.latest = (frame, time.monotonic() if captured_at is None else captured_at)
 
     def publish_state(self, snapshot):
         """Called by the main loop ~10 times a second with a snapshot dict (see snapshot.py)."""
@@ -273,9 +307,9 @@ class Streamer:
         try:
             out.write(b"retry: 1000\n\n")                 # browser reconnects after 1 s if the Pi restarts
             out.flush()
-            while True:
+            while not self._stop.is_set():
                 with self._state_cond:
-                    self._state_cond.wait_for(lambda: self._state_seq != seen, timeout=2.0)
+                    self._state_cond.wait_for(lambda: self._state_seq != seen or self._stop.is_set(), timeout=2.0)
                     data, fresh = self._state, self._state_seq != seen
                     seen = self._state_seq
                 out.write(b"data: " + data.encode() + b"\n\n" if fresh and data else b": ping\n\n")
@@ -283,8 +317,8 @@ class Streamer:
         except (BrokenPipeError, ConnectionResetError, OSError):
             pass
 
-    def wants_frames(self):
-        return self.clients > 0
+    def wants_frames(self, camera="debug"):
+        return self._feeds[camera].clients > 0
 
     def get_key(self):
         try:
@@ -294,25 +328,36 @@ class Streamer:
 
     def _encoder(self):
         period = 1.0 / max(1, cfg.STREAM_FPS)
-        while True:
-            time.sleep(period)
-            img = self._latest
-            if img is None or self.clients == 0:
-                continue
-            ok, buf = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, cfg.STREAM_JPEG_QUALITY])
-            if ok:
-                with self._cond:
-                    self._jpeg, self._jpeg_seq = buf.tobytes(), self._jpeg_seq + 1
-                    self._cond.notify_all()
+        while not self._stop.wait(period):
+            for feed in self._feeds.values():
+                if feed.clients == 0:
+                    continue
+                img = feed.image()
+                if img is None or img is feed.encoded_image:
+                    continue
+                if feed.camera and img.shape[1] > 480:
+                    preview = cv2.resize(img, (480, round(img.shape[0] * 480 / img.shape[1])))
+                else:
+                    preview = img
+                ok, buf = cv2.imencode(".jpg", preview, [cv2.IMWRITE_JPEG_QUALITY, cfg.STREAM_JPEG_QUALITY])
+                if ok:
+                    with self._cond:
+                        feed.jpeg, feed.seq = buf.tobytes(), feed.seq + 1
+                        feed.encoded_image = img
+                        self._cond.notify_all()
 
-    def _serve_stream(self, out):
-        self.clients += 1
+    def _serve_stream(self, out, camera="debug"):
+        feed = self._feeds[camera]
+        with self._cond:
+            if feed.clients == 0:
+                feed.jpeg = feed.encoded_image = None
+            feed.clients += 1
         seen = -1
         try:
-            while True:
+            while not self._stop.is_set():
                 with self._cond:
-                    self._cond.wait_for(lambda: self._jpeg_seq != seen, timeout=2.0)
-                    jpeg, seen = self._jpeg, self._jpeg_seq
+                    self._cond.wait_for(lambda: feed.seq != seen or self._stop.is_set(), timeout=1.0)
+                    jpeg, seen = feed.jpeg, feed.seq
                 if jpeg is None:
                     continue
                 out.write(b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: "
@@ -320,7 +365,15 @@ class Streamer:
         except (BrokenPipeError, ConnectionResetError, OSError):
             pass
         finally:
-            self.clients -= 1
+            with self._cond:
+                feed.clients -= 1
 
     def close(self):
+        self._stop.set()
+        with self._cond:
+            self._cond.notify_all()
+        with self._state_cond:
+            self._state_cond.notify_all()
         self.server.shutdown()
+        self.server.server_close()
+        self._encoder_thread.join(timeout=2)

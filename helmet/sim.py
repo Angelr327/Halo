@@ -2,6 +2,7 @@
 
     python -m helmet.main --sim                  # then open http://<ip>:8080/view
     python -m helmet.main --sim --demo-person    # teammates walking/jogging at you instead of cars
+    python -m helmet.main --sim --collision      # plus the front camera: walking at a chair, BRAKE
 
 Each scene moves cars around the rider in metres. They are projected to boxes with the same
 pinhole model the perception code inverts, jittered like YOLO boxes, and handed to the real
@@ -29,6 +30,9 @@ PERSON_W, PERSON_H = 0.5, 1.75
 
 
 CAM_MIN_Z = 0.6              # closer than this (or beside/ahead) the rear camera can't see it
+FRONT_CAM_HEIGHT_M = 1.6      # helmet front camera; objects stand on the floor ahead
+FRONT_SIZE = {"chair": (0.5, 0.9), "person": (PERSON_W, PERSON_H)}   # width, height seen face-on (m)
+FRONT_EVERY = 2               # front YOLO runs on every 2nd frame: it shares the model with the rear
 
 
 def _approach(x0, x1, z0, speed, until=0.6):
@@ -90,6 +94,60 @@ def _demo_scenes():
     p, _ = _hold(0.3, 4.0)
     s.append(("Teammate standing still 4 m behind: no alert", [p], 5.0))
     return s
+
+
+def _walk_to(x, z0, speed, stop_at):
+    """The rider (or both of you) closing at `speed` from z0 ahead; stops `stop_at` metres short."""
+    return lambda t: (x, max(stop_at, z0 - speed * t))
+
+
+def _front_scenes():
+    """Front camera, rider's view: x = metres to your right, z = metres ahead.
+    (title, label, position function, duration s)"""
+    return [
+        ("Walking at a chair: BRAKE before you reach it", "chair", _walk_to(0.0, 9.0, 1.4, 0.9), 9.0),
+        ("Walking past a chair 1.5 m to your right: no BRAKE", "chair", _walk_to(1.5, 9.0, 1.4, -1.0), 7.0),
+        ("Standing 3 m from a chair: no alert", "chair", _walk_to(0.1, 3.0, 0.0, 3.0), 5.0),
+        ("Person walking at you while you walk: BRAKE", "person", _walk_to(0.3, 12.0, 2.6, 1.2), 6.0),
+        ("Backing away from a chair: no alert", "chair", lambda t: (0.0, 1.5 + 1.0 * t), 5.0),
+    ]
+
+
+class FrontScenario:
+    def __init__(self, seed=11):
+        self.scenes = _front_scenes()
+        self.rng = random.Random(seed)
+        self.idx, self.t_scene = 0, 0.0
+
+    def title(self):
+        return self.scenes[self.idx][0]
+
+    def step(self, dt):
+        """Advance time; returns [(label, x, z)] for objects ahead."""
+        self.t_scene += dt
+        if self.t_scene > self.scenes[self.idx][3]:
+            self.idx, self.t_scene = (self.idx + 1) % len(self.scenes), 0.0
+        _, label, pos, _ = self.scenes[self.idx]
+        x, z = pos(self.t_scene)
+        return [(label, x, z)] if z > 0.3 else []
+
+    def boxes(self, objects):
+        """Front-camera boxes (not mirrored: image right = your right), with YOLO-like jitter."""
+        f = focal_px(W)
+        out = []
+        for label, x, z in objects:
+            size_w, size_h = FRONT_SIZE[label]
+            wj = 0.04 if label == "person" else 0.02
+            w = f * size_w / z * (1 + self.rng.uniform(-wj, wj))
+            h = f * size_h / z
+            cx = W / 2 + f * x / z + self.rng.uniform(-0.02, 0.02) * w
+            y2 = H / 2 + f * FRONT_CAM_HEIGHT_M / z + self.rng.uniform(-0.015, 0.015) * h
+            y1 = H / 2 + f * (FRONT_CAM_HEIGHT_M - size_h) / z + self.rng.uniform(-0.015, 0.015) * h
+            x1, x2 = max(0.0, cx - w / 2), min(W - 1.0, cx + w / 2)
+            y1, y2 = max(0.0, y1), min(H - 1.0, y2)
+            if x2 - x1 >= 4 and y2 > y1:
+                out.append(Detection(x1, y1, x2, y2, 0.9, label))
+        return out
 
 
 class Scenario:
@@ -196,6 +254,27 @@ def render(dets, title):
     return img
 
 
+def render_front(dets, title):
+    """A simple indoor front-camera picture: wall, floor, and the scripted chair or person."""
+    img = np.zeros((H, W, 3), np.uint8)
+    img[: H // 2] = (88, 80, 72)                               # wall
+    img[H // 2:] = (60, 70, 80)                                # floor
+    for d in dets:
+        x1, y1, x2, y2 = int(d.x1), int(d.y1), int(d.x2), int(d.y2)
+        bw, bh = x2 - x1, y2 - y1
+        if d.label == "person":
+            cv2.rectangle(img, (x1 + bw // 5, y1 + bw // 2), (x2 - bw // 5, y2), (190, 170, 150), -1)
+            cv2.circle(img, ((x1 + x2) // 2, y1 + bw // 4), max(2, bw // 4), (160, 190, 220), -1)
+            continue
+        cv2.rectangle(img, (x1, y1), (x2, y1 + bh // 2), (40, 70, 120), -1)                  # back rest
+        cv2.rectangle(img, (x1, y1 + bh // 2), (x2, y1 + bh // 2 + max(2, bh // 10)), (50, 90, 150), -1)  # seat
+        for lx in (x1, x2 - max(2, bw // 10)):
+            cv2.rectangle(img, (lx, y1 + bh // 2), (lx + max(2, bw // 10), y2), (30, 50, 90), -1)      # legs
+    cv2.putText(img, f"SIMULATOR (front): {title}", (10, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1,
+                cv2.LINE_AA)
+    return img
+
+
 class SimSource:
     """Stands in for the camera. Frames come out as the camera would give them (flipped if
     MIRROR_VIEW), so main.py's mirror step turns them back into the rider's view."""
@@ -207,10 +286,15 @@ class SimSource:
         self.objects = []                  # every road user's (x, z), including ones the camera can't see
         self.paused, self.ended = False, False
         self.t, self._last = 0.0, None
+        self.front_engine = None           # set by forward.enable_forward for --sim --collision
+        self.front = FrontScenario()
+        self.frame_count = 0
 
     @property
     def title(self):
-        return self.scenario.title()
+        if self.front_engine is None:
+            return self.scenario.title()
+        return f"{self.scenario.title()} | front: {self.front.title()}"
 
     def read(self, timeout=0.1):
         now = time.monotonic()
@@ -226,10 +310,23 @@ class SimSource:
         self.t += dt
         self.objects = self.scenario.step(dt)
         self.current = self.scenario.boxes(self.objects)
-        frame = render(self.current, self.title)
+        frame = render(self.current, self.scenario.title())
         if cfg.MIRROR_VIEW:
             frame = cv2.flip(frame, 1)
+        if self.front_engine is not None:
+            self.step_front(dt)
         return frame, self.t
+
+    def step_front(self, dt):
+        idx = self.front.idx
+        dets = self.front.boxes(self.front.step(dt))
+        if self.front.idx != idx:
+            self.front_engine.reset()      # scripted scene cut: don't carry one object's history into the next
+        front = render_front(dets, self.front.title())
+        self.front_engine.on_frame(front, self.t)
+        self.frame_count += 1
+        if self.frame_count % FRONT_EVERY == 0:
+            self.front_engine.on_detections(dets, self.t, None, front)
 
     def sonar_readings(self):
         return self.scenario.sonar(self.objects)

@@ -33,7 +33,7 @@ from .outputs import HelmetLink, Speaker
 from .overlay import Overlay
 from .perception import CENTER, LEFT, RIGHT, GlobalMotion, Tracker, VehicleDetector, update_metrics
 from .risk import SPOKEN_LABEL, AlertPolicy, SceneTrigger
-from .sources import RecoveringCamera, VideoSource, open_camera
+from .sources import CameraPreview, RecoveringCamera, VideoSource, open_camera
 from .streamer import Streamer
 
 
@@ -53,10 +53,13 @@ def parse_args():
     ap.add_argument("--no-realtime", action="store_true", help="process every video frame (slower than real time)")
     ap.add_argument("--loop", action="store_true", help="loop the video")
     ap.add_argument("--camera", type=int, default=None, help="camera index")
-    ap.add_argument("--collision", action="store_true", help="enable calibrated helmet-front chair collision demo")
-    ap.add_argument("--collision-calibration", help="measured front camera/marker/alignment JSON (tools.calibrate_front)")
+    ap.add_argument("--collision", action="store_true",
+                    help="front camera BRAKE warning: camera-only by default, marker mode with --collision-calibration")
+    ap.add_argument("--collision-calibration", help="marker mode: measured front camera/marker/alignment JSON "
+                                                    "(tools.calibrate_front); omit for camera-only")
     ap.add_argument("--collision-log", help="write forward measurements and decisions as JSON lines")
-    ap.add_argument("--front-camera", type=int, default=cfg.FRONT_CAMERA_INDEX)
+    ap.add_argument("--front-camera", type=int, default=cfg.FRONT_CAMERA_INDEX,
+                    help="front camera index for the web preview and collision mode")
     ap.add_argument("--front-video", help="synchronized front clip; requires --video rear clip")
     ap.add_argument("--replay-timestamps", help="paired host capture timestamps from tools.record_pair")
     ap.add_argument("--port", help="Arduino serial port (default: auto-detect)")
@@ -72,14 +75,16 @@ def parse_args():
     ap.add_argument("--stream", type=int, default=None, help="web view port (0 = off; default 8080 on a Pi)")
     ap.add_argument("--camera-source", choices=["auto", "usb", "picamera2"], help="camera type")
     args = ap.parse_args()
+    if args.collision_calibration and not args.collision:
+        ap.error("--collision-calibration requires --collision")
     if args.collision:
-        if not args.collision_calibration:
-            ap.error("--collision requires --collision-calibration")
-        if args.sim:
-            ap.error("--collision uses live cameras or paired videos, not the rear-only --sim")
-        if bool(args.video) != bool(args.front_video):
+        if args.sim and args.collision_calibration:
+            ap.error("marker mode needs real marker images; use --sim --collision without a calibration")
+        if args.sim and (args.video or args.front_video):
+            ap.error("--sim scripts both cameras; don't pass videos")
+        if not args.sim and bool(args.video) != bool(args.front_video):
             ap.error("collision replay requires both --video and --front-video")
-        if not args.video and args.front_camera == (cfg.CAMERA_INDEX if args.camera is None else args.camera):
+        if not (args.video or args.sim) and args.front_camera == (cfg.CAMERA_INDEX if args.camera is None else args.camera):
             ap.error("front and rear camera indices must differ")
     elif args.front_video:
         ap.error("--front-video requires --collision")
@@ -164,7 +169,7 @@ def main():
     args = parse_args()
     load_dotenv()
     apply_overrides(args)
-    if args.collision:
+    if args.collision_calibration:
         from .collision import Calibration
         Calibration.load(args.collision_calibration)  # fail before opening hardware
 
@@ -190,14 +195,30 @@ def main():
             hud.close()
             link.close()
             raise
-        print("Front collision demo: stationary marked chair, straight approach, look ahead")
+        if forward.mode == "marker":
+            print("Front collision demo: stationary marked chair, straight approach, look ahead")
+        else:
+            print("Front warning: camera-only (no calibration): BRAKE when an object ahead is "
+                  f"{forward.settings.brake_ttc_s:.1f} s from contact")
     fusion = SonarFusion()
     recorder = IncidentRecorder(client=gateway.client)
     st = State()
     headless = cfg.HEADLESS
     streamer = Streamer(cfg.STREAM_PORT) if cfg.STREAM_PORT else None
+    front_camera_preview = None
     if streamer:
         streamer.incidents = recorder
+        if forward is None:
+            rear_index = cfg.CAMERA_INDEX if args.camera is None else args.camera
+            if args.sim or args.video:
+                streamer.publish_camera("front", None, unavailable="No front feed in this run")
+            elif args.front_camera == rear_index:
+                streamer.publish_camera("front", None, unavailable="Choose a different front camera")
+            else:
+                front_camera_preview = CameraPreview(
+                    args.front_camera, cfg.FRONT_CAMERA_ROTATE_180,
+                    wanted=lambda: streamer.wants_frames("front"),
+                    publish=lambda frame: streamer.publish_camera("front", frame))
     print(f"Detector: {detector.model_name} @ {cfg.IMGSZ} | Camera: {type(source).__name__} | "
           f"Serial: {link.status} | Gemini: {gateway.status if not gateway.available else cfg.GEMINI_MODEL}")
     print(f"HUD: {hud.status}")
@@ -400,6 +421,9 @@ def main():
         while running:
             frame, t = (None, None) if st.sim_fault else source.read(timeout=0.1)
             now = time.monotonic()
+            if streamer and forward is not None:
+                front_frame, captured_at = forward.camera_frame()
+                streamer.publish_camera("front", front_frame, captured_at=captured_at if source.is_live else now)
 
             for item in [s for s in st.scheduled if s[0] <= now]:
                 st.scheduled.remove(item)
@@ -417,6 +441,10 @@ def main():
                     break
                 if source.is_live and (st.sim_fault or source.stale_for() > cfg.CAMERA_TIMEOUT_S) and not st.fault:
                     set_fault(True)
+                if streamer and st.fault:
+                    streamer.publish_camera("rear", None)
+                elif streamer and not source.is_live and st.last_frame is not None:
+                    streamer.publish_camera("rear", st.last_frame)  # keep a paused replay visible
                 if st.fault:
                     st.light = 0                      # fail-visible: normal flashing bike light
                 # A front-only replay event (or pause) must not advance the
@@ -444,6 +472,8 @@ def main():
                 set_fault(False)
             if cfg.MIRROR_VIEW and not getattr(source, "frames_are_mirrored", False):
                 frame = cv2.flip(frame, 1)
+            if streamer:
+                streamer.publish_camera("rear", frame)
             st.t = t
             st.age_ms = (now - t) * 1000 if source.is_live else 0.0
             dt_loop = now - st.last_loop
@@ -507,6 +537,8 @@ def main():
     except KeyboardInterrupt:
         pass
     finally:
+        if front_camera_preview:
+            front_camera_preview.close()
         if streamer:
             streamer.close()
         if st.writer is not None:

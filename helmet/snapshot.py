@@ -69,7 +69,17 @@ def build(tracks, t, *, hud_state, fault=False, shaky=False, light=0, fps=0.0, d
         if age < 6.0:
             caption = {"text": text, "src": src, "age": round(age, 1)}
     front = []
-    if collision and collision.get("valid") and collision.get("x") is not None and collision.get("z") is not None:
+    if collision and collision.get("obstacles") is not None:   # camera-only mode: everything tracked ahead
+        for o in collision["obstacles"]:
+            if o.get("x") is None or o.get("z") is None:
+                continue
+            front.append({"id": o["id"], "source": "front", "label": o["label"], "detected_label": o["label"],
+                          "display_asset": o.get("display_asset"), "x": _r(o["x"]),
+                          "z": _r(-min(o["z"], MAX_Z)),  # shared world: positive behind, negative ahead
+                          "tier": o["tier"], "live": True, "ttc": _r(o.get("ttc"), 1), "on_path": bool(o["on_path"]),
+                          "path": None, "alongside": False, "approx": True,
+                          "reason": collision["reason"] if o["tier"] else ""})
+    elif collision and collision.get("valid") and collision.get("x") is not None and collision.get("z") is not None:
         front.append({"id": collision["target_id"], "source": "front", "label": "chair",
                       "detected_label": "chair", "display_asset": "tree", "x": _r(collision["x"]),
                       "z": _r(-collision["z"]),  # shared world: positive behind, negative ahead

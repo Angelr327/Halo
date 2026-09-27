@@ -1,6 +1,10 @@
-# Helmet forward collision demo
+# Helmet forward collision demo: marker mode
 
-The `--collision` option runs both helmet cameras. It detects a **chair**, associates a known-size ArUco marker with it, estimates approach speed to that stationary target, and shows **BRAKE / BRAKE** on the OLED. The web scene deliberately draws that chair as a tree. The detector and telemetry still say `chair`.
+> **No time to calibrate?** `--collision` without `--collision-calibration` runs the
+> camera-only mode instead: same BRAKE warning, no marker or checkerboard. See
+> [FRONT_CAMERA_ONLY.md](FRONT_CAMERA_ONLY.md). This page covers the marker mode.
+
+`--collision --collision-calibration FILE` runs both helmet cameras. It detects a **chair**, associates a known-size ArUco marker with it, estimates approach speed to that stationary target, and shows **BRAKE / BRAKE** on the OLED. The web scene deliberately draws that chair as a tree. The detector and telemetry still say `chair`.
 
 This is a calibrated, low-speed hackathon demo. It does not independently measure bike speed, know bike heading during head turns, or detect arbitrary collision hazards. There is no accelerometer, ultrasonic, GPS, cloud, or external speed-sensor dependency. The original rear-only invocation continues to work.
 
@@ -58,8 +62,7 @@ The pose implementation follows [OpenCV marker detection](https://docs.opencv.or
 
 ```bash
 python -m helmet.main --collision --collision-calibration front_calibration.json \
-  --camera 1 --front-camera 0 --headless --stream 8080 --no-gemini \
-  --collision-log collision_run.jsonl
+  --headless --stream 8080 --no-gemini --collision-log collision_run.jsonl
 ```
 
 The OLED shows BRAKE above rear arrows while rear haptic alerts continue. The web debug stream shows both camera views; `/view` shows the front chair as a tree, rear traffic, and forward state. `--no-hud` retains the preview without physical display writes.
@@ -121,6 +124,7 @@ Software checks (no cameras, YOLO weights, or GPIO needed):
 
 ```bash
 python -m tests.test_collision
+python -m tests.test_front_mono
 python -m tests.test_synthetic
 python -m tests.test_hud
 python -m tests.test_sources

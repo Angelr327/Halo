@@ -2,6 +2,10 @@
 
 Only the inference thread touches YOLO. The marker worker and OLED do not wait
 for it. Rear detections are returned to the existing main loop via an adapter.
+
+Two front engines share one interface (measure / on_frame / on_detections):
+ForwardEngine (ArUco marker + calibration, --collision-calibration) and
+front_mono.MonoFrontEngine (camera-only box-growth TTC, no calibration).
 """
 import json
 import math
@@ -14,11 +18,15 @@ import cv2
 
 from . import config as cfg
 from .collision import Calibration, CollisionPolicy, MarkerRanger
+from .front_mono import MonoFrontEngine
 from .perception import Tracker
 from .sources import RecoveringCamera, VideoSource
 
 
 class ForwardEngine:
+    mode = "marker"
+    front_classes = {56: "chair"}
+
     def __init__(self, calibration, callback, log_path=None):
         self.ranger = MarkerRanger(calibration)
         self.policy = CollisionPolicy(calibration)
@@ -31,6 +39,7 @@ class ForwardEngine:
         self.last_input_t = None
         self.latest = dict(self.policy.result)
         self.frame = None
+        self.frame_received_at = 0.0
         self.log = open(log_path, "w", encoding="utf-8") if log_path else None
         if self.log:
             self.log.write(json.dumps({"type": "session", "calibration": calibration.to_dict(),
@@ -47,6 +56,21 @@ class ForwardEngine:
             self.last_input_t = None
             self.times.clear()
             self.detection_times.clear()
+
+    @property
+    def stale_s(self):
+        return self.policy.cfg.stale_s
+
+    def measure(self, frame):
+        """Per-frame work that doesn't need YOLO: the marker pose."""
+        return self.ranger.measure(frame)
+
+    def on_frame(self, frame, t, meas, age_s=0.0):
+        pose, reason = meas
+        self.process(frame, t, pose, reason, age_s=age_s)
+
+    def on_detections(self, dets, t, meas, frame, age_s=0.0):
+        self.associate(dets, t, meas[0])
 
     def associate(self, detections, t, pose):
         with self.lock:
@@ -71,6 +95,7 @@ class ForwardEngine:
                 self.reset()
             self.last_input_t = t
             self.frame = frame
+            self.frame_received_at = time.monotonic()
             result = self.policy.update(pose, t, associated=0 <= t - self.associated_t <= self.policy.cfg.association_s,
                                         age_s=age_s, reason=reason)
             if pose is not None:
@@ -98,6 +123,10 @@ class ForwardEngine:
     def snapshot(self):
         with self.lock:
             return dict(self.latest)
+
+    def camera_frame(self):
+        with self.lock:
+            return self.frame, self.frame_received_at
 
     def preview(self):
         with self.lock:
@@ -177,12 +206,12 @@ class DualLiveSource:
             try:
                 frame, t = self.front.read(timeout=0.1)
                 if frame is None:
-                    if self.front.stale_for() > self.engine.policy.cfg.stale_s:
+                    if self.front.stale_for() > self.engine.stale_s:
                         self.engine.unavailable(time.monotonic(), "FRONT CAMERA OFFLINE")
                     continue
-                pose, reason = self.engine.ranger.measure(frame)
-                self._submit("front", (frame, t, pose))
-                self.engine.process(frame, t, pose, reason, age_s=max(0.0, time.monotonic() - t))
+                meas = self.engine.measure(frame)
+                self._submit("front", (frame, t, meas))
+                self.engine.on_frame(frame, t, meas, age_s=max(0.0, time.monotonic() - t))
             except Exception as e:
                 self.engine.unavailable(time.monotonic(), f"FRONT ERROR: {type(e).__name__}")
                 print(f"[front capture] {e}")
@@ -198,14 +227,14 @@ class DualLiveSource:
                 if not self._inputs:
                     continue
                 side = preferred if preferred in self._inputs else next(iter(self._inputs))
-                frame, t, pose = self._inputs.pop(side)
+                frame, t, meas = self._inputs.pop(side)
                 preferred = "front" if side == "rear" else "rear"
-            if time.monotonic() - t > self.engine.policy.cfg.stale_s:
+            if time.monotonic() - t > self.engine.stale_s:
                 continue
             try:
                 if side == "front":
-                    dets = self.detector.detect(frame, class_map={56: "chair"})
-                    self.engine.associate(dets, t, pose)
+                    dets = self.detector.detect(frame, class_map=self.engine.front_classes)
+                    self.engine.on_detections(dets, t, meas, frame, age_s=max(0.0, time.monotonic() - t))
                 else:
                     image = cv2.flip(frame, 1) if cfg.MIRROR_VIEW else frame
                     dets = self.detector.detect(image)
@@ -341,9 +370,9 @@ always use media time, including pauses and loops, for reproducible results.
         self.last_t = t
         self.pending[side] = self._next(side)
         if side == 1:
-            pose, reason = self.engine.ranger.measure(frame)
-            self.engine.associate(self.detector.detect(frame, class_map={56: "chair"}), t, pose)
-            self.engine.process(frame, t, pose, reason)
+            meas = self.engine.measure(frame)
+            self.engine.on_detections(self.detector.detect(frame, class_map=self.engine.front_classes), t, meas, frame)
+            self.engine.on_frame(frame, t, meas)
             return None, None
         frame = cv2.flip(frame, 1) if cfg.MIRROR_VIEW else frame
         self.read_detections = self.detector.detect(frame)
@@ -360,8 +389,13 @@ always use media time, including pauses and loops, for reproducible results.
 
 
 def enable_forward(args, rear_source, detector, hud):
-    calibration = Calibration.load(args.collision_calibration)
-    engine = ForwardEngine(calibration, hud.update_collision, args.collision_log)
+    if args.collision_calibration:
+        engine = ForwardEngine(Calibration.load(args.collision_calibration), hud.update_collision, args.collision_log)
+    else:
+        engine = MonoFrontEngine(hud.update_collision, args.collision_log)
+    if args.sim:
+        rear_source.front_engine = engine                # the simulator scripts the front camera too
+        return rear_source, detector, engine
     if args.front_video:
         rear_source.release()
         try:

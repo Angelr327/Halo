@@ -134,7 +134,8 @@ class Hud:
         if elapsed > 0.8:
             result.update(state="UNAVAILABLE", reason="FRONT PROCESSING STALE", valid=False,
                           alignment_valid=False, speed_mps=None, distance_m=None, ttc_s=None,
-                          warning_distance_m=None, x=None, z=None, on_path=False)
+                          warning_distance_m=None, x=None, z=None, on_path=False,
+                          **({"obstacles": []} if "obstacles" in result else {}))
         if result.get("measurement_age_s") is not None:
             result["measurement_age_s"] += elapsed
         return result

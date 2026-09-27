@@ -227,6 +227,8 @@ class PiCamera(LiveCamera):
             self.cam.stop()
         except Exception:
             pass
+        finally:
+            self.cam.close()  # stop alone keeps the camera acquired
 
 
 def pi_camera_num(port, info=None):
@@ -304,3 +306,41 @@ class RecoveringCamera:
         self.closed = True
         if self.source:
             self.source.release()
+
+
+class CameraPreview:
+    """Optional front capture for the web view; only open it while someone watches.
+
+    Collision mode shares its existing capture instead. This worker never runs
+    detection and a missing/busy camera cannot block the rear safety loop.
+    """
+    def __init__(self, index, rotate_180, wanted, publish):
+        self.index, self.rotate_180 = index, rotate_180
+        self.wanted, self.publish = wanted, publish
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def _run(self):
+        source = None
+        try:
+            while not self._stop.is_set():
+                if not self.wanted():
+                    if source is not None:
+                        source.release()
+                        source = None
+                        self.publish(None)
+                    self._stop.wait(0.1)
+                    continue
+                if source is None:
+                    source = RecoveringCamera(self.index, self.rotate_180)
+                frame, _ = source.read(timeout=0.1)
+                if frame is not None:
+                    self.publish(frame)
+        finally:
+            if source is not None:
+                source.release()
+
+    def close(self):
+        self._stop.set()
+        self._thread.join(timeout=2)

@@ -58,9 +58,17 @@
   .legend { display: flex; flex-wrap: wrap; gap: 4px 12px; color: var(--muted); font-size: 11px; }
   .legend i { display: inline-block; width: 9px; height: 9px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
 
-  #cam { position: fixed; right: 12px; top: 52px; z-index: 4; width: min(30vw, 400px);
-    border-radius: 12px; overflow: hidden; border: 1px solid var(--line); background: #000; }
-  #cam img { display: block; width: 100%; }
+  #cam { position: fixed; right: max(12px, env(safe-area-inset-right)); bottom: 76px; z-index: 4;
+    width: min(44vw, 560px); display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .camera-tile { margin: 0; border-radius: 12px; overflow: hidden; border: 1px solid var(--line);
+    background: #0b0e13; box-shadow: 0 4px 18px rgba(0, 0, 0, 0.25); }
+  .camera-tile figcaption { padding: 7px 10px; color: var(--text); background: var(--panel);
+    font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
+  .camera-image { position: relative; aspect-ratio: 4 / 3; }
+  .camera-message { position: absolute; inset: 0; display: grid; place-items: center;
+    padding: 8px; text-align: center; font-size: 12px; color: var(--muted); }
+  #cam img { position: relative; display: block; width: 100%; height: 100%; object-fit: contain; background: #0b0e13; }
+  #cam img[hidden] { display: none; }
   #cam.hidden { display: none; }
 
   .overlay { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center;
@@ -73,9 +81,13 @@
   @media (max-width: 640px) {
     #banner { top: 50px; padding: 10px 14px 10px 10px; gap: 10px; width: calc(100vw - 24px); }
     #bTitle { font-size: 16px; }
-    #cam { width: 46vw; top: auto; bottom: 60px; }
-    #corner { top: auto; bottom: 60px; max-width: 50vw; }
+    #cam { width: calc(100vw - 24px); bottom: max(64px, calc(env(safe-area-inset-bottom) + 48px)); }
+    #corner { top: auto; bottom: calc((100vw - 34px) * 0.375 + 112px + env(safe-area-inset-bottom)); max-width: calc(100vw - 24px); }
+    body.cameras-hidden #corner { bottom: 60px; }
     #caption { bottom: 12px; }
+  }
+  @media (max-height: 480px) and (orientation: landscape) {
+    #cam { width: min(40vw, 360px); bottom: 52px; }
   }
 </style>
 </head>
@@ -89,7 +101,7 @@
   <div class="brand">BLINDSPOT</div>
   <div id="status" class="pill"><span class="dot"></span><span id="statusText">connecting</span></div>
   <div id="stats"></div>
-  <button id="camBtn" type="button">Camera</button>
+  <button id="camBtn" type="button" aria-controls="cam" aria-expanded="true">Hide cameras</button>
 </header>
 
 <div id="banner" class="hidden">
@@ -97,7 +109,18 @@
   <div><div id="bTitle"></div><div id="bSub"></div></div>
 </div>
 
-<div id="cam"><img id="camImg" alt="rear camera"></div>
+<div id="cam" aria-label="Camera previews">
+  <figure class="camera-tile">
+    <figcaption>Front camera</figcaption>
+    <div class="camera-image"><span class="camera-message" id="frontMessage">Connecting&hellip;</span>
+      <img id="frontCamImg" alt="Front camera preview"></div>
+  </figure>
+  <figure class="camera-tile">
+    <figcaption>Rear camera</figcaption>
+    <div class="camera-image"><span class="camera-message" id="rearMessage">Connecting&hellip;</span>
+      <img id="rearCamImg" alt="Rear camera preview"></div>
+  </figure>
+</div>
 
 <div id="corner">
   <div id="scene"></div>
@@ -151,8 +174,11 @@ function placeCamera() {
   const w = window.innerWidth, h = window.innerHeight;
   renderer.setSize(w, h, false);
   camera.aspect = w / h;
-  if (forwardView) {
-    camera.fov = camera.aspect < 0.8 ? 65 : 55;
+  if (forwardView && camera.aspect < 0.8) {     // phone: aim 6 m ahead so what's in front of you
+    camera.fov = 65;                            // clears the legend and camera tiles at the bottom
+    camera.position.set(0, 19, -25); camera.lookAt(0, 0, -6);
+  } else if (forwardView) {
+    camera.fov = 55;
     camera.position.set(0, 19, -19); camera.lookAt(0, 0, 0);
   } else if (camera.aspect < 0.8) {             // phone, portrait: higher, to fit the road width
     camera.fov = 60; camera.position.set(0, 11.5, -9.5); camera.lookAt(0, 0, 7.5);
@@ -542,10 +568,23 @@ function updateBanner(data) {
   const collision = data.collision;
   if (collision && collision.state !== 'CLEAR') {
     const b = $('banner');
-    $('bTitle').textContent = collision.state === 'BRAKE' ? 'BRAKE  BRAKE' : collision.state === 'CAUTION' ? 'Obstacle ahead' : collision.reason;
-    $('bSub').textContent = collision.valid
-      ? `${collision.distance_m.toFixed(2)} m gap · estimated approach ${collision.speed_mps.toFixed(2)} m/s · brake boundary ${collision.warning_distance_m.toFixed(2)} m`
-      : 'Forward estimate unavailable · stationary-chair demo';
+    if (collision.mode === 'camera-only') {        // box-growth TTC: time is the solid number, metres are rough
+      const what = collision.detected_label || 'object';
+      $('bTitle').textContent = collision.state === 'BRAKE' ? 'BRAKE  BRAKE'
+        : collision.state === 'CAUTION' ? `${what[0].toUpperCase()}${what.slice(1)} ahead` : collision.reason;
+      const bits = [];
+      if (collision.ttc_s != null) bits.push(`${collision.ttc_s.toFixed(1)} s to contact`);
+      if (collision.z != null) bits.push(`~${collision.z.toFixed(1)} m ahead`);
+      if (collision.speed_mps != null) bits.push(`closing ~${collision.speed_mps.toFixed(1)} m/s`);
+      $('bSub').textContent = bits.length ? bits.join(' · ')
+        : collision.reason === 'BRAKE HOLD' ? 'Out of the camera\u2019s view now · holding the warning'
+        : collision.state === 'INITIALIZING' ? 'Starting the front camera' : 'Front camera unavailable';
+    } else {
+      $('bTitle').textContent = collision.state === 'BRAKE' ? 'BRAKE  BRAKE' : collision.state === 'CAUTION' ? 'Obstacle ahead' : collision.reason;
+      $('bSub').textContent = collision.valid
+        ? `${collision.distance_m.toFixed(2)} m gap · estimated approach ${collision.speed_mps.toFixed(2)} m/s · brake boundary ${collision.warning_distance_m.toFixed(2)} m`
+        : 'Forward estimate unavailable · stationary-chair demo';
+    }
     $('arrow').innerHTML = ''; bannerKey = '';
     b.dataset.tier = collision.state === 'BRAKE' ? '3' : '2';
     b.style.setProperty('--c', TIER_CSS[b.dataset.tier]);
@@ -607,7 +646,9 @@ function onState(data) {
     cap.classList.remove('hidden');
   } else cap.classList.add('hidden');
   const lines = [];
-  if (data.collision) lines.push('<b>FRONT DEMO</b> &middot; detected chair shown as tree &middot; straight approach, look ahead');
+  if (data.collision) lines.push(data.collision.mode === 'camera-only'
+    ? '<b>FRONT</b> &middot; camera-only, no calibration &middot; chairs shown as trees &middot; look where you&rsquo;re going'
+    : '<b>FRONT DEMO</b> &middot; detected chair shown as tree &middot; straight approach, look ahead');
   if (data.demo_person) lines.push('<b>DEMO MODE</b> &middot; people stand in for cars');
   if (data.scene) lines.push(`<b>SIMULATOR</b> &middot; ${data.scene.replace(/[<&]/g, '')}`);
   $('scene').innerHTML = lines.join('<br>');
@@ -625,15 +666,37 @@ function connect() {
 }
 connect();
 
-// ------------------------------------------------------------------ camera inset
-let camOn = !(window.innerWidth < 640 && window.innerHeight > window.innerWidth);
+// ------------------------------------------------------------------ camera previews
+let camOn = true;
+const cameraRetries = {};
+function openCamera(side) {
+  const img = $(side + 'CamImg');
+  img.hidden = false;
+  img.src = '/stream.mjpg?camera=' + side + (tok ? '&t=' + encodeURIComponent(tok) : '');
+}
+for (const side of ['front', 'rear']) {
+  $(side + 'CamImg').addEventListener('error', () => {
+    if (!camOn || document.hidden) return;
+    $(side + 'CamImg').hidden = true;
+    $(side + 'Message').textContent = 'Camera connection lost';
+    clearTimeout(cameraRetries[side]);
+    cameraRetries[side] = setTimeout(() => { if (camOn && !document.hidden) openCamera(side); }, 2000);
+  });
+}
 function setCam(on) {
   camOn = on;
   $('cam').classList.toggle('hidden', !on);
-  $('camImg').src = on ? '/stream.mjpg' + (tok ? '?t=' + encodeURIComponent(tok) : '') : '';  // no stream = no Pi CPU
-  $('camBtn').textContent = on ? 'Hide camera' : 'Camera';
+  document.body.classList.toggle('cameras-hidden', !on);
+  for (const side of ['front', 'rear']) {
+    clearTimeout(cameraRetries[side]);
+    if (on && !document.hidden) openCamera(side);
+    else $(side + 'CamImg').removeAttribute('src');  // release the stream and optional front capture
+  }
+  $('camBtn').textContent = on ? 'Hide cameras' : 'Show cameras';
+  $('camBtn').setAttribute('aria-expanded', String(on));
 }
 $('camBtn').addEventListener('click', () => setCam(!camOn));
+document.addEventListener('visibilitychange', () => setCam(camOn));
 setCam(camOn);
 
 // ------------------------------------------------------------------ animation
@@ -677,7 +740,9 @@ function frame() {
     for (const m of c.mats) m.opacity = c.fade;
     c.glowMat.color.setHex(TIER_HEX[Math.max(tier, 1)]);
     c.glowMat.opacity = c.fade * (tier >= 3 ? (blinkOn ? 0.95 : 0.35) : tier === 2 ? 0.6 : 0);
-    const text = d.source === 'front' ? `chair · ${Math.abs(d.z).toFixed(1)} m ahead` : d.measured != null ? `${d.measured.toFixed(2)} m gap`     // side sensor: a real measurement
+    const text = d.source === 'front' ? (tier >= 2 && d.ttc != null ? `${d.label} · ${d.ttc.toFixed(1)} s`
+        : `${d.label} · ${d.approx ? '~' : ''}${Math.abs(d.z).toFixed(1)} m ahead`)
+      : d.measured != null ? `${d.measured.toFixed(2)} m gap`     // side sensor: a real measurement
       : tier >= 1 && d.ttc != null && !d.alongside ? `${d.ttc.toFixed(1)} s`
       : d.alongside ? 'beside' : `${Math.round(d.z)} m`;
     setLabel(c.label, text, tier);
