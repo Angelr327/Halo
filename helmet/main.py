@@ -33,7 +33,7 @@ from .outputs import HelmetLink, Speaker
 from .overlay import Overlay
 from .perception import CENTER, LEFT, RIGHT, GlobalMotion, Tracker, VehicleDetector, update_metrics
 from .risk import SPOKEN_LABEL, AlertPolicy, SceneTrigger
-from .sources import VideoSource, open_camera
+from .sources import RecoveringCamera, VideoSource, open_camera
 from .streamer import Streamer
 
 
@@ -53,6 +53,12 @@ def parse_args():
     ap.add_argument("--no-realtime", action="store_true", help="process every video frame (slower than real time)")
     ap.add_argument("--loop", action="store_true", help="loop the video")
     ap.add_argument("--camera", type=int, default=None, help="camera index")
+    ap.add_argument("--collision", action="store_true", help="enable calibrated helmet-front chair collision demo")
+    ap.add_argument("--collision-calibration", help="measured front camera/marker/alignment JSON (tools.calibrate_front)")
+    ap.add_argument("--collision-log", help="write forward measurements and decisions as JSON lines")
+    ap.add_argument("--front-camera", type=int, default=cfg.FRONT_CAMERA_INDEX)
+    ap.add_argument("--front-video", help="synchronized front clip; requires --video rear clip")
+    ap.add_argument("--replay-timestamps", help="paired host capture timestamps from tools.record_pair")
     ap.add_argument("--port", help="Arduino serial port (default: auto-detect)")
     ap.add_argument("--no-gemini", action="store_true")
     ap.add_argument("--no-hud", action="store_true", help="don't drive the transparent OLED")
@@ -65,7 +71,21 @@ def parse_args():
     ap.add_argument("--window", action="store_true", help="force the OpenCV window even on a Pi")
     ap.add_argument("--stream", type=int, default=None, help="web view port (0 = off; default 8080 on a Pi)")
     ap.add_argument("--camera-source", choices=["auto", "usb", "picamera2"], help="camera type")
-    return ap.parse_args()
+    args = ap.parse_args()
+    if args.collision:
+        if not args.collision_calibration:
+            ap.error("--collision requires --collision-calibration")
+        if args.sim:
+            ap.error("--collision uses live cameras or paired videos, not the rear-only --sim")
+        if bool(args.video) != bool(args.front_video):
+            ap.error("collision replay requires both --video and --front-video")
+        if not args.video and args.front_camera == (cfg.CAMERA_INDEX if args.camera is None else args.camera):
+            ap.error("front and rear camera indices must differ")
+    elif args.front_video:
+        ap.error("--front-video requires --collision")
+    if args.replay_timestamps and not (args.collision and args.front_video):
+        ap.error("--replay-timestamps requires collision replay")
+    return args
 
 
 def apply_overrides(args):
@@ -144,6 +164,9 @@ def main():
     args = parse_args()
     load_dotenv()
     apply_overrides(args)
+    if args.collision:
+        from .collision import Calibration
+        Calibration.load(args.collision_calibration)  # fail before opening hardware
 
     if args.sim:
         from .sim import SimDetector, SimSource
@@ -151,12 +174,23 @@ def main():
         detector = SimDetector(source)
     else:
         source = VideoSource(args.video, realtime=not args.no_realtime, loop=args.loop) if args.video \
-            else open_camera(args.camera)
+            else RecoveringCamera(args.camera) if args.collision else open_camera(args.camera)
         print("Loading YOLO...")
         detector = VehicleDetector()
     motion, tracker, policy, scene = GlobalMotion(), Tracker(), AlertPolicy(), SceneTrigger()
     link, speaker, gateway, overlay = HelmetLink(args.port), Speaker(), GeminiGateway(), Overlay()
     hud = Hud(enabled=not args.no_hud)
+    forward = None
+    if args.collision:
+        from .forward import enable_forward
+        try:
+            source, detector, forward = enable_forward(args, source, detector, hud)
+        except Exception:
+            source.release()
+            hud.close()
+            link.close()
+            raise
+        print("Front collision demo: stationary marked chair, straight approach, look ahead")
     fusion = SonarFusion()
     recorder = IncidentRecorder(client=gateway.client)
     st = State()
@@ -261,6 +295,12 @@ def main():
             "fault": st.fault, "shaky": motion.shaky(st.t), "recording": st.writer is not None,
             "paused": getattr(source, "paused", False), "scene_note": st.scene_note, "hud": hud.preview,
             "incident": recorder.recording})
+        if forward is not None:
+            front_preview = forward.preview()
+            if front_preview is not None:
+                ph, pw = front_preview.shape[:2]
+                front_preview = cv2.resize(front_preview, (int(pw * canvas.shape[0] / ph), canvas.shape[0]))
+                canvas = cv2.hconcat([canvas, front_preview])
         if st.writer is not None:
             st.writer.write(cv2.resize(canvas, st.writer_size))
         if streamer:
@@ -278,6 +318,7 @@ def main():
             tracker.tracks, st.t, hud_state=hud.state, fault=st.fault, shaky=shaky, light=st.light,
             fps=st.fps, det_ms=detector.last_ms, link=link, profile=policy.profile_name,
             captions=speaker.captions, scene=getattr(source, "title", None), contacts=fusion.contacts,
+            collision=hud.collision,
             incidents={"latest": recorder.latest_id, "recording": recorder.recording}))
 
     def poll_key():
@@ -342,6 +383,8 @@ def main():
                 h, w = st.last_frame.shape[:2]
                 size = (int((w + (cfg.PANEL_WIDTH if overlay.show_panel else 0)) * cfg.DISPLAY_SCALE),
                         int(h * cfg.DISPLAY_SCALE))
+                if forward is not None:
+                    size = (size[0] + int(w * cfg.DISPLAY_SCALE), size[1])
                 name = time.strftime("rec_%Y%m%d_%H%M%S.mp4")
                 st.writer = cv2.VideoWriter(name, cv2.VideoWriter_fourcc(*"mp4v"), max(5, round(st.fps)), size)
                 st.writer_size = size
@@ -376,12 +419,18 @@ def main():
                     set_fault(True)
                 if st.fault:
                     st.light = 0                      # fail-visible: normal flashing bike light
-                fusion.update([], now, link, now=now)            # side sensors still work with no camera
-                for f in policy.evaluate_contacts(fusion.contacts, [], now, False):
+                # A front-only replay event (or pause) must not advance the
+                # incident recorder from media seconds to host monotonic seconds.
+                event_t = now if source.is_live else getattr(source, "last_t", st.t)
+                fusion.update([], event_t, link, now=now)         # side sensors still work with no camera
+                for f in policy.evaluate_contacts(fusion.contacts, [], event_t, False):
                     execute_fire(f)
-                    recorder.trigger(f, now)
-                recorder.poll(now)
-                hud.update([], fault=st.fault, extra=fusion.hud_state())
+                    recorder.trigger(f, event_t)
+                recorder.poll(event_t)
+                # A front replay event is not a lost rear frame. Keep the last rear
+                # state while it is fresh; fault handling still clears failed cameras.
+                hud.update(tracker.tracks if args.collision and not st.fault else [],
+                           fault=st.fault, extra=fusion.hud_state())
                 publish_snapshot(now)
                 link.tick(st.light if st.light_override is None else st.light_override)
                 apply_gemini()
@@ -393,7 +442,7 @@ def main():
 
             if st.fault:
                 set_fault(False)
-            if cfg.MIRROR_VIEW:
+            if cfg.MIRROR_VIEW and not getattr(source, "frames_are_mirrored", False):
                 frame = cv2.flip(frame, 1)
             st.t = t
             st.age_ms = (now - t) * 1000 if source.is_live else 0.0

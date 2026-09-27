@@ -2,6 +2,12 @@ Created by: Sion King
 
 # Blind-spot helmet
 
+**Forward collision demo:** both helmet cameras can run together with calibrated,
+marker-assisted chair ranging and a **BRAKE / BRAKE** OLED warning. Start with the
+[setup, calibration, replay, and validation guide](docs/COLLISION_DEMO.md).
+This is a stationary-target, straight-approach hackathon demo; rear-only operation
+continues to use the commands below.
+
 Rear-facing camera → local YOLO detection → directional haptics, a rear light that warns the
 driver, and short spoken alerts. Gemini adds language on top, asynchronously, and is never
 in the safety path.
@@ -168,9 +174,9 @@ the back of the helmet) and the **front camera the normal way up**. In `helmet/c
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `CAMERA_INDEX` | `0` | which camera is the rear one (Pi camera number = CSI port) |
+| `CAMERA_INDEX` | `1` | which camera is the rear one (verify with `python -m tools.bench check`) |
 | `CAMERA_ROTATE_180` | `True` | rear camera upside down; rotated in the camera itself (no CPU cost) |
-| `FRONT_CAMERA_INDEX` | `1` | the front camera |
+| `FRONT_CAMERA_INDEX` | `0` | the helmet-front camera |
 | `FRONT_CAMERA_ROTATE_180` | `False` | front camera upright |
 | `MIRROR_VIEW` | `True` | applied after the rotation, so rider-left shows on the left |
 

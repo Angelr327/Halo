@@ -63,7 +63,10 @@ class LiveCamera:
     def _loop(self):
         fails = 0
         while self._running:
-            ok, frame = self._grab()
+            try:
+                ok, frame = self._grab()
+            except Exception:
+                ok, frame = False, None
             if ok and frame is not None:
                 if self._sw_rotate:
                     frame = cv2.rotate(frame, cv2.ROTATE_180)
@@ -77,7 +80,10 @@ class LiveCamera:
                 fails += 1
                 time.sleep(0.02)
                 if fails == 50:                 # ~1 s of failures: try to reopen (camera unplugged)
-                    self._reopen()
+                    try:
+                        self._reopen()
+                    except Exception:
+                        pass  # absent camera must not kill its reconnect worker
                     fails = 0
 
     def read(self, timeout=0.1):
@@ -168,7 +174,9 @@ class PiCamera(LiveCamera):
     Install with apt (python3-picamera2) and create the venv with --system-site-packages."""
 
     def __init__(self, index=None, rotate_180=None, port=None):
-        port = cfg.CAMERA_PORT if port is None and index is None else port
+        if port is None:                       # rear by default; the front camera's number means the front connector
+            port = cfg.CAMERA_PORT if index is None else \
+                cfg.FRONT_CAMERA_PORT if index == cfg.FRONT_CAMERA_INDEX else None
         if port:
             index = pi_camera_num(port)
         super().__init__(index, rotate_180)
@@ -248,3 +256,51 @@ def open_camera(index=None, rotate_180=None):
     if src == "picamera2" or (src == "auto" and _pi_camera_present()):
         return PiCamera(index, rotate_180)
     return LiveCamera(index, rotate_180)
+
+
+class RecoveringCamera:
+    """Lazy camera startup for dual mode: a missing CSI port cannot stop its peer.
+
+    read() is called from that camera's dedicated worker, so driver startup and
+    reconnect delays never block the other camera or the display.
+    """
+    is_live = True
+    ended = False
+
+    def __init__(self, index=None, rotate_180=None):
+        self.index, self.rotate_180 = index, rotate_180
+        self.source = None
+        self.last_ok = time.monotonic()
+        self.retry_at = 0.0
+        self.closed = False
+
+    def read(self, timeout=0.1):
+        if self.closed:
+            return None, None
+        if self.source is None and time.monotonic() >= self.retry_at:
+            try:
+                opened = open_camera(self.index, self.rotate_180)
+                if self.closed:
+                    opened.release()
+                    return None, None
+                self.source = opened
+            except Exception:
+                self.retry_at = time.monotonic() + 1.0
+        if self.source is None:
+            time.sleep(min(timeout, 0.1))
+            return None, None
+        frame, t = self.source.read(timeout)
+        if frame is not None:
+            self.last_ok = time.monotonic()
+        return frame, t
+
+    def stale_for(self):
+        return time.monotonic() - self.last_ok
+
+    def toggle_pause(self):
+        pass
+
+    def release(self):
+        self.closed = True
+        if self.source:
+            self.source.release()

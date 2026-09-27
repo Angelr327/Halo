@@ -136,15 +136,24 @@ def test_endpoints():
             raise AssertionError("no snapshot yet: should be 503")
         except urllib.error.HTTPError as e:
             assert e.code == 503
-        st.publish_state({"cars": [{"id": 9}], "hud": {}})
+        state = snapshot.build([_track(id=9)], 1.0, hud_state={"LEFT": 2},
+                               collision={"state": "BRAKE", "reason": "BRAKING BOUNDARY", "valid": True,
+                                          "target_id": "front:marker:0", "x": 0.0, "z": 3.0,
+                                          "on_path": True, "ttc_s": 2.0},
+                               incidents={"latest": "rear-incident", "recording": True})
+        st.publish_state(state)
         polled = json.loads(get("/api/v1/state").read())            # what the iOS app polls
         assert polled["cars"][0]["id"] == 9
+        assert polled["collision"]["state"] == "BRAKE"
+        assert polled["front_obstacles"][0]["display_asset"] == "tree"
+        assert polled["incidents"] == {"latest": "rear-incident", "recording": True}
         r = get("/state")
         lines = []
         while len([ln for ln in lines if ln.startswith(b"data:")]) < 1:
             lines.append(r.readline().strip())
         data = json.loads([ln for ln in lines if ln.startswith(b"data:")][0][5:])
         assert data["cars"][0]["id"] == 9
+        assert data == polled, "browser and iOS must receive the same combined snapshot"
         r.close()
         print("  /view, /static (no path traversal), /state SSE: ok")
     finally:

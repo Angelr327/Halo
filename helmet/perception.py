@@ -115,9 +115,9 @@ class VehicleDetector:
             m[0] = "person"
         return m
 
-    def detect(self, frame):
+    def detect(self, frame, class_map=None):
         t0 = time.perf_counter()
-        cmap = self.class_map()
+        cmap = self.class_map() if class_map is None else class_map
         r = self.model.predict(frame, imgsz=cfg.IMGSZ, conf=cfg.CONF_THRESHOLD, classes=list(cmap),
                                device=cfg.DEVICE, verbose=False)[0]
         dets = []
