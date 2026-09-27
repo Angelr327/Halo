@@ -223,17 +223,19 @@ class MonoFrontEngine:
         for d, label, dist, tier, ttc in boxes:
             color = TIER_BGR.get(tier, TIER_BGR[0])
             cv2.rectangle(img, (int(d.x1), int(d.y1)), (int(d.x2), int(d.y2)), color, 2)
-            text = f"{label} ~{dist:.1f}m" + (f" {ttc:.1f}s" if ttc is not None else "") if dist else label
+            text = f"{label} est {dist:.1f}m" + (f" {ttc:.1f}s" if ttc is not None else "") if dist else label  # no "~" in Hershey fonts
             cv2.putText(img, text, (int(d.x1), max(12, int(d.y1) - 5)), cv2.FONT_HERSHEY_SIMPLEX, 0.45, color, 1)
         color = (30, 30, 255) if r["state"] == "BRAKE" else (0, 220, 255)
         lines = [f"FRONT  {r['state']}  (camera-only)", r["reason"]]
         if r.get("z") is not None:
             speed = f" | closing {r['speed_mps']:.1f} m/s" if r.get("speed_mps") else ""
             contact = f" | contact {r['ttc_s']:.1f} s" if r.get("ttc_s") is not None else ""
-            lines.append(f"~{r['z']:.1f} m{speed}{contact}")
+            lines.append(f"est {r['z']:.1f} m{speed}{contact}")
+        width = max(cv2.getTextSize(line, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)[0][0] for line in lines)
+        box = img[:12 + 25 * len(lines), :min(img.shape[1], width + 16)]
+        box[:] = (box * 0.35).astype(img.dtype)                  # dark panel behind the status lines
         for i, line in enumerate(lines):
-            cv2.putText(img, line, (8, 23 + i * 25), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 3)
-            cv2.putText(img, line, (8, 23 + i * 25), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
+            cv2.putText(img, line, (8, 23 + i * 25), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1, cv2.LINE_AA)
         return img
 
     def close(self):

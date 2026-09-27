@@ -270,8 +270,8 @@ def render_front(dets, title):
         cv2.rectangle(img, (x1, y1 + bh // 2), (x2, y1 + bh // 2 + max(2, bh // 10)), (50, 90, 150), -1)  # seat
         for lx in (x1, x2 - max(2, bw // 10)):
             cv2.rectangle(img, (lx, y1 + bh // 2), (lx + max(2, bw // 10), y2), (30, 50, 90), -1)      # legs
-    cv2.putText(img, f"SIMULATOR (front): {title}", (10, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1,
-                cv2.LINE_AA)
+    cv2.putText(img, f"SIMULATOR (front): {title}", (10, H - 12), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1,
+                cv2.LINE_AA)                                   # bottom: the front preview's status lines are at the top
     return img
 
 
