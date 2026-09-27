@@ -21,9 +21,9 @@ IS_PI = _is_raspberry_pi()        # Pi-friendly defaults below switch on automat
 
 # ---------------------------------------------------------------- input
 CAMERA_SOURCE = "auto"            # [restart] "auto" (Pi camera if present, else USB) | "usb" | "picamera2"
-CAMERA_INDEX = 0                  # [restart] which camera is the REAR one: Pi camera number (0/1 = CSI port) or USB index
+CAMERA_INDEX = 1                  # [restart] which camera is the REAR one: Pi camera number or USB index (check with: python -m tools.bench check)
 CAMERA_ROTATE_180 = True          # [restart] rear camera mounted upside down (cable routed down the back of the helmet)
-FRONT_CAMERA_INDEX = 1            # [restart] front camera (riding conditions): the other CSI port
+FRONT_CAMERA_INDEX = 0            # [restart] front camera (riding conditions): the other one
 FRONT_CAMERA_ROTATE_180 = False   # [restart] front camera is mounted the normal way up
 CAPTURE_WIDTH = 640               # [restart]
 CAPTURE_HEIGHT = 480              # [restart]
@@ -142,6 +142,23 @@ SCENE_STARTUP_DELAY_S = 4.0
 SCENE_MIN_GAP_S = 90.0
 SCENE_STALE_S = 180.0
 VOICE_QUERY_SECONDS = 3.0
+
+# ---------------------------------------------------------------- incident reports (dashcam)
+INCIDENT_ENABLED = True           # [restart] save a clip + report for each serious alert
+INCIDENT_MIN_TIER = 3             # 3 = HIGH alerts only; 2 = also MED (blind spot) alerts; manual marks always
+INCIDENT_PRE_S = 6.0              # seconds of video kept from BEFORE the alert
+INCIDENT_POST_S = 4.0             # seconds recorded AFTER it (extended if more alerts follow)
+INCIDENT_MAX_S = 20.0             # longest single incident (pre-roll not included)
+INCIDENT_COOLDOWN_S = 15.0        # the same vehicle can't open another incident this soon
+INCIDENT_FPS = 10                 # clip frame rate (lower = less CPU/storage)
+INCIDENT_FRAME_WIDTH = 480        # clip width in pixels (height keeps the aspect ratio)
+INCIDENT_JPEG_QUALITY = 75        # in-memory buffer quality
+INCIDENT_ANNOTATE = True          # draw boxes, time-to-contact / measured gap and a time bar on the clip
+INCIDENT_DIR = "incidents"        # [restart] where clips and reports are saved (git-ignored)
+INCIDENT_MAX_KEEP = 50            # oldest incidents are deleted beyond this many
+INCIDENT_AUTO_ANALYZE = True      # ask Gemini for a report as soon as a clip is saved
+INCIDENT_KEYFRAMES = 6            # frames sent to Gemini per incident
+INCIDENT_GEMINI_BUDGET = 30       # hard cap on incident analyses per session (separate from live alerts)
 
 # ---------------------------------------------------------------- Arduino link
 SERIAL_PORT = None                # None = auto-detect, or "COM5" / "/dev/cu.usbserial-1410"

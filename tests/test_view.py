@@ -12,7 +12,10 @@ from collections import deque
 from contextlib import redirect_stdout
 from types import SimpleNamespace
 
+import tempfile
+
 from helmet import config as cfg
+cfg.INCIDENT_DIR = tempfile.mkdtemp(prefix="incidents-test-")   # keep test clips out of the repo
 from helmet import main as M
 from helmet import snapshot
 from helmet.perception import Tracker, update_metrics
@@ -128,7 +131,14 @@ def test_endpoints():
                 raise AssertionError(f"{bad} should be 404")
             except urllib.error.HTTPError as e:
                 assert e.code == 404
+        try:
+            get("/api/v1/state")
+            raise AssertionError("no snapshot yet: should be 503")
+        except urllib.error.HTTPError as e:
+            assert e.code == 503
         st.publish_state({"cars": [{"id": 9}], "hud": {}})
+        polled = json.loads(get("/api/v1/state").read())            # what the iOS app polls
+        assert polled["cars"][0]["id"] == 9
         r = get("/state")
         lines = []
         while len([ln for ln in lines if ln.startswith(b"data:")]) < 1:

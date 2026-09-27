@@ -15,7 +15,10 @@ from contextlib import redirect_stdout
 import cv2
 import numpy as np
 
+import tempfile
+
 from helmet import config as cfg
+cfg.INCIDENT_DIR = tempfile.mkdtemp(prefix="incidents-test-")   # keep test clips out of the repo
 from helmet import main as M
 from helmet import perception
 
