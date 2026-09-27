@@ -343,7 +343,8 @@ def main():
             fps=st.fps, det_ms=detector.last_ms, link=link, profile=policy.profile_name,
             captions=speaker.captions, scene=getattr(source, "title", None), contacts=fusion.contacts,
             collision=hud.collision,
-            incidents={"latest": recorder.latest_id, "recording": recorder.recording}))
+            incidents={"latest": recorder.latest_id, "recording": recorder.recording,
+                       "current": recorder.active_reference}))
 
     def poll_key():
         k = cv2.waitKey(1) & 0xFF if not headless else 255

@@ -43,7 +43,17 @@ final class SafetyEventRepository: SafetyEventStoring {
 
     func add(_ event: SafetyEvent) {
         var events = subject.value
-        events.append(event)
+        if let incidentID = event.incidentID,
+           let index = events.firstIndex(where: { $0.incidentID == incidentID }) {
+            var merged = event
+            merged.id = events[index].id
+            merged.latitude = merged.latitude ?? events[index].latitude
+            merged.longitude = merged.longitude ?? events[index].longitude
+            merged.speed = merged.speed ?? events[index].speed
+            events[index] = merged
+        } else {
+            events.append(event)
+        }
         events.sort { $0.timestamp > $1.timestamp }
         subject.send(events)
         persist(events)

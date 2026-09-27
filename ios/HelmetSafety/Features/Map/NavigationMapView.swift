@@ -94,6 +94,7 @@ struct NavigationMapView: View {
                 .padding(AppSpacing.screen)
             }
             .toolbar(.hidden, for: .navigationBar)
+            .onAppear { recenterMap() }
             .onChange(of: viewModel.navigationState.destinationName) { _, _ in cameraPosition = .automatic }
             .onChange(of: viewModel.navigationState.isNavigating) { _, navigating in
                 if navigating { recenterMap() }
@@ -116,18 +117,7 @@ struct NavigationMapView: View {
     }
 
     private func recenterMap() {
-        guard let latitude = viewModel.location.latitude, let longitude = viewModel.location.longitude else {
-            cameraPosition = .userLocation(followsHeading: true, fallback: .automatic)
-            return
-        }
-        cameraPosition = .camera(
-            MapCamera(
-                centerCoordinate: CLLocationCoordinate2D(latitude: latitude, longitude: longitude),
-                distance: 280,
-                heading: viewModel.location.headingDegrees ?? 0,
-                pitch: 55
-            )
-        )
+        cameraPosition = .userLocation(followsHeading: true, fallback: .automatic)
     }
 
     private func mapControlButton(_ icon: String, action: @escaping () -> Void) -> some View {

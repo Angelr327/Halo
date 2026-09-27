@@ -116,6 +116,7 @@ class MonoFrontPolicy:
             speed = tr.dist_m / tr.ttc if tr.approaching and math.isfinite(tr.ttc) and tr.ttc > 0 else None
             receding = tr.ready and tr.growth <= 1 / cfg.MIN_GROWTH_RATIO
             r.update(target_id=f"front:{tr.id}", detected_label=tr.label, display_asset=display_asset(tr.label),
+                     confidence=round(float(tr.det.conf), 3),
                      x=tr.lat_m, z=tr.dist_m, distance_m=max(0.0, tr.dist_m - self.cfg.bike_front_m),
                      speed_mps=speed, trend="closing" if speed else "receding" if receding else "stationary",
                      ttc_s=ttc, warning_distance_m=speed * self.cfg.brake_ttc_s if speed else None, on_path=in_path)
@@ -125,6 +126,7 @@ class MonoFrontPolicy:
     @staticmethod
     def _obstacle(tier, ttc, in_path, tr):
         return {"id": f"front:{tr.id}", "label": tr.label, "display_asset": display_asset(tr.label),
+                "confidence": round(float(tr.det.conf), 3),
                 "x": tr.lat_m, "z": tr.dist_m, "tier": tier, "ttc": ttc, "on_path": in_path}
 
 

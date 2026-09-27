@@ -31,6 +31,7 @@ def build(tracks, t, *, hud_state, fault=False, shaky=False, light=0, fps=0.0, d
         cars.append({
             "id": tr.id,
             "label": tr.label,
+            "confidence": _r(getattr(getattr(tr, "det", None), "conf", None)),
             "x": _r(tr.lat_m),
             "z": _r(ALONGSIDE_Z if tr.alongside else min(tr.dist_m, MAX_Z)),
             "zone": tr.zone,
@@ -74,6 +75,7 @@ def build(tracks, t, *, hud_state, fault=False, shaky=False, light=0, fps=0.0, d
             if o.get("x") is None or o.get("z") is None:
                 continue
             front.append({"id": o["id"], "source": "front", "label": o["label"], "detected_label": o["label"],
+                          "confidence": o.get("confidence"),
                           "display_asset": o.get("display_asset"), "x": _r(o["x"]),
                           "z": _r(-min(o["z"], MAX_Z)),  # shared world: positive behind, negative ahead
                           "tier": o["tier"], "live": True, "ttc": _r(o.get("ttc"), 1), "on_path": bool(o["on_path"]),

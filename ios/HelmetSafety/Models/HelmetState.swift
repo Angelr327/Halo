@@ -42,4 +42,30 @@ struct HelmetState: Equatable {
     var serialStatus: String = ""
     var sensitivityProfile: String = ""
     var sonarDistances: [String: Double?] = [:]
+    var connectionStatus: String = "Offline"
+    var estimatedTTC: Double? = nil
+    var currentVehicleID: String? = nil
+    var alertTier: Int = 0
+    var cameraShaky: Bool = false
+    var rearLightLevel: Int = 0
+    var latestCaption: String? = nil
+    var sceneDescription: String? = nil
+    var corridorHalfWidthMeters: Double = 0
+    var demoPersonMode: Bool = false
+    var hudAlertTiers: [String: Int] = [:]
+    var sonarMounts: [String: SonarMountState] = [:]
+    var frontBrakeActive: Bool = false
+    var frontWarningState: String = "CLEAR"
+    var frontTargetID: String? = nil
+    var frontDetectedObject: String? = nil
+    var frontDistanceMeters: Double? = nil
+    var frontTTCSeconds: Double? = nil
+    var frontReason: String? = nil
+    var frontObstacleCount: Int = 0
+}
+
+struct SonarMountState: Equatable {
+    var zone: String
+    var yawDegrees: Double
+    var offsetMeters: Double
 }
