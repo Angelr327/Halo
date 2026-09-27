@@ -3,15 +3,15 @@ Created by: Sion King
 # Blind-spot helmet
 
 A bike helmet that watches the road behind you. A rear camera runs YOLO on a Raspberry Pi, and
-the helmet warns you with left or right vibration, a rear light aimed at the driver, a
-transparent heads-up display and short spoken alerts. Gemini writes descriptions and incident
-reports on the side. It never decides whether an alert fires.
+the helmet warns you with left or right vibration, a short chirp for the most urgent threats, a
+rear light aimed at the driver, a transparent heads-up display and short spoken alerts. Gemini
+writes descriptions and incident reports on the side. It never decides whether an alert fires.
 
 `--collision` adds the front camera. It uses the same box-growth time to contact as the rear,
-so it needs no calibration, and it shows BRAKE on the display when something ahead is 2.8 s
-away. The 3D view draws front and rear traffic together. The guide, test cases and roadmap are
-in [FRONT_CAMERA_ONLY.md](docs/FRONT_CAMERA_ONLY.md), and `--sim --collision` runs it with no
-hardware. [COLLISION_DEMO.md](docs/COLLISION_DEMO.md) covers an older marker mode that measures
+so it needs no calibration. When something ahead is 2.8 s away, the display shows BRAKE and
+the buzzers chirp three times. The 3D view draws front and rear traffic together. The guide,
+test cases and roadmap are in [FRONT_CAMERA_ONLY.md](docs/FRONT_CAMERA_ONLY.md), and
+`--sim --collision` runs it with no hardware. [COLLISION_DEMO.md](docs/COLLISION_DEMO.md) covers an older marker mode that measures
 exact metres but needs calibration. The rear-only commands below work without either.
 
 ```
@@ -150,9 +150,10 @@ goes straight to the Uno pin.
 Check the wiring before mounting. Flash the sketch from the Pi with
 `bash scripts/flash_arduino.sh` (no Arduino IDE needed; `bash scripts/flash_arduino.sh
 hcsr04_test` for the sensor test), then run `python -m tools.bench serial` on the Pi. You should
-feel left then right at power-up. `l` and `r` buzz each side (strong also beeps), `u` prints the
-four distances (wave a hand in front of each sensor), and `z0` mutes the buzzers. Total draw is
-roughly 250 mA from the Pi's USB (see the power note above).
+feel left then right at power-up. `l` and `r` buzz each side (strong also chirps twice), `c`
+chirps both buzzers like a front BRAKE, `u` prints the four distances (wave a hand in front of
+each sensor), and `z0` mutes the buzzers. Total draw is roughly 250 mA from the Pi's USB (see
+the power note above).
 
 ### Standalone two-sensor test
 
@@ -360,10 +361,14 @@ to your left.
 
 `L<n>` `R<n>` `B<n>` haptics (0 stop, 1 gentle, 2 medium, 3 strong, 4 fault) ·
 `M<n>` light 0 normal / 1 alert / 2 danger (sent every 250 ms, which doubles as the heartbeat) ·
+`C<n>` n short chirps (1 to 3) on both buzzers, no vibration · `Z1`/`Z0` buzzers on / muted ·
 `F1`/`F0` host fault · `X` all off · `?` status.
+A strong buzz (3) also chirps twice on its side, 40 ms each. The buzzers stay quiet for gentle
+and medium, and a side that just chirped waits 1 s before chirping again. Set
+`CHIRPS_FOR_LEVEL` in the sketch to change that.
 The board replies `READY`, `BTN`, `FAILSAFE`, `LINK OK` or `ERR <line>`.
 If no command arrives for 1.5 s, the light becomes a normal flashing bike light and both motors
-give a long buzz.
+give a long buzz, with a beep.
 
 ## Calibration procedure
 
@@ -408,9 +413,9 @@ with the camera level and pointing straight back.
 6. Test shake. Wear the helmet, nod and turn your head while the teammate stands still at 5 m.
    `SHAKY` should light up during the movement. No MED or HIGH may fire, and the zone must not
    flip. Raise `SHAKE_GATE_FRAC` if normal riding posture keeps triggering SHAKY.
-7. Check the tiers. Jog at the camera from 10 m: HIGH (red, both motors, strobe, "Person
-   behind!") should fire about 2 to 3 s out. Walk past on the left line: MED left, not HIGH.
-   Walk past 0.95 m to the left: HIGH left ("close pass"; 0.7 m is inside the lane, so that one
+7. Check the tiers. Jog at the camera from 10 m: HIGH (red, both motors, two chirps, strobe,
+   "Person behind!") should fire about 2 to 3 s out. Walk past on the left line: MED left, not
+   HIGH. Walk past 0.95 m to the left: HIGH left ("close pass"; 0.7 m is inside the lane, so that one
    is HIGH "behind"). Start 2 m left and walk diagonally into the centre line: HIGH "cutting in"
    before you reach it. Walk in and stand still half out of frame at the edge: MED "alongside"
    at most, never HIGH.

@@ -44,6 +44,7 @@ def serial_cmd(args):
             time.sleep(cfg.HEARTBEAT_S)
     threading.Thread(target=heartbeat, daemon=True).start()
     print("Commands: l / r / b = strong buzz left/right/both, 1 2 3 4 = pattern on both,\n"
+          "          c = three chirps on both buzzers (front BRAKE), no vibration,\n"
           "          0 1 2 prefixed with m (m0 m1 m2) = light mode, f = fault buzz,\n"
           "          s = stop heartbeat (failsafe should trigger in 1.5 s), h = resume, q = quit,\n"
           "          u = print ultrasonic distances on/off, z0 / z1 = mute / unmute buzzers,\n"
@@ -58,6 +59,8 @@ def serial_cmd(args):
             link.send(f"{cmd.upper()}3")
         elif cmd in ("1", "2", "3", "4"):
             link.send(f"B{cmd}")
+        elif cmd == "c":
+            link.chirp(3)
         elif cmd in ("m0", "m1", "m2"):
             state["light"] = int(cmd[1])
         elif cmd == "f":

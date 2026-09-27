@@ -26,6 +26,7 @@ from helmet.collision import CollisionPolicy, Settings, stopping_distance
 from helmet.forward import DualLiveSource, DualReplaySource
 from helmet.front_mono import MonoFrontEngine
 from helmet.hud import Hud, render
+from helmet.outputs import FrontChirp, HelmetLink
 from helmet.sim import FrontScenario, SimSource
 from tests.test_collision import calibration
 from tools.eval_front import QUIET, approach
@@ -135,6 +136,31 @@ class OutputTests(unittest.TestCase):
         hud._collision_updated -= 1
         self.assertEqual(hud.collision["state"], "UNAVAILABLE")
         self.assertEqual(hud.collision["obstacles"], [])
+
+    def test_brake_chirps_once_when_it_starts(self):
+        class Link:
+            def __init__(self):
+                self.sent = []
+
+            def chirp(self, n, now=None):
+                self.sent.append((now, n))
+        states = [(0.0, None), (0.1, "CLEAR"), (0.2, "CAUTION"), (0.3, "BRAKE"), (0.4, "BRAKE"),
+                  (1.0, "CAUTION"), (1.2, "BRAKE"),                   # flicker inside the gap: quiet
+                  (2.0, "CLEAR"), (3.0, "UNAVAILABLE"), (3.5, "BRAKE"), (3.6, "BRAKE")]
+        link, chirp = Link(), FrontChirp()
+        for t, state in states:
+            chirp.update(None if state is None else {"state": state}, link, t)
+        self.assertEqual(link.sent, [(0.3, cfg.FRONT_BRAKE_CHIRPS), (3.5, cfg.FRONT_BRAKE_CHIRPS)])
+        with patch.object(cfg, "FRONT_BRAKE_CHIRPS", 0):
+            link, chirp = Link(), FrontChirp()
+            chirp.update({"state": "BRAKE"}, link, 0.0)
+            self.assertEqual(link.sent, [])
+
+    def test_chirp_command_stays_in_the_firmware_range(self):
+        link = HelmetLink("/dev/null-no-arduino")
+        for n in (2, 7, -1):
+            link.chirp(n)
+        self.assertEqual(list(link.tx_log)[-3:], ["C2", "C3", "C0"])
 
 
 class GrowingChairDetector:
@@ -257,9 +283,15 @@ class CommandLineTests(unittest.TestCase):
                 "--port", "/dev/null-no-arduino"]
         cfg.TTS_ENABLED = False
         out = io.StringIO()
+        sent = []
+
+        class SpyLink(HelmetLink):
+            def send(self, cmd, now=None):
+                sent.append(cmd)
+                super().send(cmd, now)
 
         def run():
-            with patch.object(sys, "argv", argv), redirect_stdout(out):
+            with patch.object(sys, "argv", argv), patch.object(M, "HelmetLink", SpyLink), redirect_stdout(out):
                 M.main()
         th = threading.Thread(target=run, daemon=True)
         th.start()
@@ -278,6 +310,10 @@ class CommandLineTests(unittest.TestCase):
             self.assertLess(snap["front_obstacles"][0]["z"], 0)
             self.assertIn("| front: ", snap["scene"])
             self.assertIn("camera-only (no calibration)", out.getvalue())
+            deadline = time.monotonic() + 2                  # the main loop reads BRAKE on its next pass
+            while f"C{cfg.FRONT_BRAKE_CHIRPS}" not in sent and time.monotonic() < deadline:
+                time.sleep(0.05)
+            self.assertIn(f"C{cfg.FRONT_BRAKE_CHIRPS}", sent)
         finally:
             urllib.request.urlopen(f"http://127.0.0.1:{port}/key?c=q", timeout=3)
             th.join(timeout=5)

@@ -29,7 +29,7 @@ from .fusion import SonarFusion
 from .hud import Hud
 from .incidents import IncidentRecorder
 from . import snapshot
-from .outputs import HelmetLink, Speaker
+from .outputs import FrontChirp, HelmetLink, Speaker
 from .overlay import Overlay
 from .perception import CENTER, LEFT, RIGHT, GlobalMotion, Tracker, VehicleDetector, update_metrics
 from .risk import SPOKEN_LABEL, AlertPolicy, SceneTrigger
@@ -201,6 +201,7 @@ def main():
             print("Front warning: camera-only (no calibration): BRAKE when an object ahead is "
                   f"{forward.settings.brake_ttc_s:.1f} s from contact")
     fusion = SonarFusion()
+    front_chirp = FrontChirp()
     recorder = IncidentRecorder(client=gateway.client)
     st = State()
     headless = cfg.HEADLESS
@@ -421,6 +422,8 @@ def main():
         while running:
             frame, t = (None, None) if st.sim_fault else source.read(timeout=0.1)
             now = time.monotonic()
+            if forward is not None:
+                front_chirp.update(hud.collision, link, now)      # BRAKE chirps even if the rear stalls
             if streamer and forward is not None:
                 front_frame, captured_at = forward.camera_frame()
                 streamer.publish_camera("front", front_frame, captured_at=captured_at if source.is_live else now)

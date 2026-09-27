@@ -97,9 +97,9 @@ python -m helmet.main --collision --collision-calibration front_calibration.json
   --headless --stream 8080 --no-gemini --collision-log collision_run.jsonl
 ```
 
-During BRAKE the OLED shows only BRAKE, while the rear haptic alerts keep firing. The web debug
-stream shows both camera views, and `/view` shows the front chair as a tree along with rear
-traffic and the forward state. `--no-hud` keeps the preview without writing to the physical
+When BRAKE starts, both buzzers chirp three times. During BRAKE the OLED shows only BRAKE,
+while the rear haptic alerts keep firing. The web debug stream shows both camera views, and
+`/view` shows the front chair as a tree along with rear traffic and the forward state. `--no-hud` keeps the preview without writing to the physical
 display.
 
 The front and rear captures each feed a latest-frame buffer. One YOLO worker alternates between

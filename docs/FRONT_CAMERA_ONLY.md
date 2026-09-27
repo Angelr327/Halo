@@ -57,7 +57,9 @@ looks for people.
 
    BRAKE fires at 2.8 s: the 2.3 s, plus about 0.5 s for the front's detection rate and a
    2-frame confirmation. CAUTION fires at 4.5 s (orange in the view, like the rear's blind-spot
-   tier). BRAKE stays up for at least 0.8 s.
+   tier). BRAKE stays up for at least 0.8 s. When it starts, both buzzers chirp three times
+   (40 ms each, `FRONT_BRAKE_CHIRPS` in `config.py`). A BRAKE that flickers off and on chirps
+   at most once every 1.5 s, and CAUTION stays silent.
 6. Distance comes from the box width and a typical width per class (chair 0.5 m, person 0.5 m,
    car 1.8 m). It's rough (±20 to 30%) and only displayed, marked `~` in the view. No decision
    uses it.
@@ -70,7 +72,8 @@ code in `helmet/perception.py`.
 1. Put a chair in open floor space. Start 7 to 8 m away, facing it.
 2. Walk at a normal pace straight at it, looking where you're going.
    - About 4.5 s out, the tree turns orange and the banner says "Chair ahead".
-   - About 2.8 s out (3.5 to 4 m at a walk), the OLED says BRAKE and the tree turns red.
+   - About 2.8 s out (3.5 to 4 m at a walk), the OLED says BRAKE, the buzzers chirp three
+     times and the tree turns red.
    - Stop, and the warning clears.
 3. Walk past the chair 1.5 m to one side. Nothing should fire.
 4. Stand still 3 m from it. Nothing should fire.
@@ -94,6 +97,7 @@ through the real engine and the real 3D view.
 | Losing the camera holds BRAKE briefly and never drops it silently; time going backwards (a replay loop) starts fresh | `test_camera_loss_holds_brake_briefly_then_unavailable` |
 | Same output fields as marker mode, valid JSON, decision log written | `test_result_matches_marker_fields_and_is_json`, `test_log_and_preview` |
 | Every tracked object ahead reaches the 3D view, a stale feed clears them, and the OLED shows BRAKE | `OutputTests` |
+| BRAKE chirps once when it starts, a flickering BRAKE doesn't chirp again within 1.5 s, and the `--sim --collision` run sends the chirp to the Arduino | `test_brake_chirps_once_when_it_starts`, `test_main_sim_collision_serves_front_and_rear` |
 | Live dual-camera threads, paired-video replay and the simulator scenes reach BRAKE when they should and not otherwise | `RuntimeTests` |
 | `--collision` needs no calibration, and `--sim --collision` serves front and rear together end to end | `CommandLineTests` |
 

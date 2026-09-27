@@ -4,7 +4,8 @@ Serial protocol (newline-terminated ASCII, see firmware):
   L<n>/R<n>/B<n>  haptic pattern n (1 gentle, 2 medium, 3 strong, 4 fault, 0 stop)
   M<n>            light mode (0 normal, 1 alert, 2 danger) - also the heartbeat
   F1 / F0         host-detected fault on / off
-  Z1 / Z0         buzzers on / muted
+  C<n>            n short chirps (1-3) on both buzzers, no vibration (front BRAKE)
+  Z1 / Z0         buzzers on / muted (a strong buzz also chirps twice on its side)
 Board -> host: READY, BTN, FAILSAFE, LINK OK, U <SL> <SR> <BL> <BR> (ultrasonic cm, -1 = none)
 The heartbeat is sent from the vision loop, so if that loop freezes the Arduino's
 watchdog trips and the light falls back to a normal flashing bike light.
@@ -101,6 +102,9 @@ class HelmetLink:
         for s in (("L", "R") if side == "B" else (side,)):
             self.motor_flash[s] = now
 
+    def chirp(self, n, now=None):
+        self.send(f"C{max(0, min(3, int(n)))}", now)       # the firmware plays 1-3
+
     def set_fault(self, on):
         self.send("F1" if on else "F0")
 
@@ -165,6 +169,26 @@ class HelmetLink:
                 self.ser.close()
             except Exception:
                 pass
+
+
+class FrontChirp:
+    """Chirps both buzzers once when the front warning turns to BRAKE.
+    Call every loop iteration with hud.collision; a flickering BRAKE chirps at most once per
+    FRONT_CHIRP_GAP_S."""
+
+    def __init__(self):
+        self.last_state = None
+        self.last_t = -1e9
+
+    def update(self, collision, link, now):
+        state = (collision or {}).get("state")
+        entered = state == "BRAKE" and self.last_state != "BRAKE"
+        self.last_state = state
+        if not entered or cfg.FRONT_BRAKE_CHIRPS <= 0 or now - self.last_t < cfg.FRONT_CHIRP_GAP_S:
+            return False
+        self.last_t = now
+        link.chirp(cfg.FRONT_BRAKE_CHIRPS, now)
+        return True
 
 
 class Speaker:
