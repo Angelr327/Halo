@@ -104,21 +104,23 @@ part below takes power from those rails.
 
 | Part | Part pin | Uno pin |
 |---|---|---|
-| Ultrasonic SL (left side, pointing out ~5° back) | TRIG / ECHO | D6 / D7 |
-| Ultrasonic SR (right side, pointing out ~5° back) | TRIG / ECHO | D8 / D12 |
+| Ultrasonic SL (left side, pointing out ~5° back) | TRIG / ECHO | **D7 / D6** |
+| Ultrasonic SR (right side, pointing out ~5° back) | TRIG / ECHO | **D11 / D10** |
 | Ultrasonic BL (back, left of centre, optional) | TRIG / ECHO | A0 / A1 |
 | Ultrasonic BR (back, right of centre, optional) | TRIG / ECHO | A2 / A3 |
 | Left vibration motor | via NPN (below), or module IN | D5 |
-| Right vibration motor | via NPN, or module IN | D10 |
-| Left buzzer | I/O (3-pin module), or via NPN | D9 |
-| Right buzzer | I/O, or via NPN | D11 |
+| Right vibration motor | via NPN, or module IN | D9 |
+| Left buzzer | I/O (3-pin module), or via NPN | D4 |
+| Right buzzer | I/O, or via NPN | D12 |
 | Optional button | one leg | D3 (other leg → GND) |
 | Optional NeoPixel rear light | DIN | D2 (330 Ω in series if you have one) |
 | All ultrasonics, modules | VCC / GND | + rail / − rail |
 
 The Uno is 5V, so the HC-SR04 ECHO pins connect directly (no voltage dividers, unlike the Pi).
-Mark each wired sensor `true` in `SONAR_FITTED` in the sketch (only SL is on by default); only
-fitted sensors are pinged, so one sensor updates ~33 times a second, two ~16.
+Mark each wired sensor `true` in `SONAR_FITTED` in the sketch (SL and SR are on by default); only
+fitted sensors are pinged, so one sensor updates ~33 times a second, two ~16. Note TRIG and
+ECHO are **not** in number order (left: TRIG D7, ECHO D6): swapping them gives no readings and
+makes the sensor's ECHO fight an Arduino output.
 
 **Bare vibration disc (2 wires): one NPN transistor each** (2N2222 / PN2222 / S8050).
 Never drive a motor straight from a pin; it draws more than a pin can give.
@@ -141,7 +143,8 @@ Total draw is roughly 250 mA from the Pi's USB (see the power note above).
 
 ### Standalone two-sensor test
 
-`firmware/hcsr04_test/hcsr04_test.ino` tests both helmet sensors with this wiring:
+`firmware/hcsr04_test/hcsr04_test.ino` tests both helmet sensors with the same wiring as the
+helmet firmware:
 
 | Sensor | TRIG | ECHO |
 |---|---|---|
@@ -155,9 +158,8 @@ Each line shows separate **LEFT** and **RIGHT** distances (or `no echo`) and ech
 percentages. Pings alternate with a 65 ms quiet gap; the built-in LED lights if either
 sensor reads under 50 cm.
 
-This test wiring differs from the main helmet wiring above: the main firmware uses
-D10/D11 for the right motor/buzzer. Restore the main wiring before uploading
-`helmet_arduino.ino` again. Close Serial Monitor before using the helmet app or bench tool.
+No rewiring is needed to go back to `helmet_arduino.ino`. Close Serial Monitor before using
+the helmet app or bench tool.
 
 ## Camera + ultrasonic fusion
 
@@ -169,8 +171,8 @@ The camera says *what* it is and *that it approached*; the sensor says *how clos
 level** (at most ~10-15° back; the default config assumes 5°). A car's flat side reflects sound
 away at steep angles, so angled-back sensors miss cars. Tilt slightly up, never down, and check
 that each reads `---` with nobody around (a steady reading = it sees your shoulder or backpack).
-Tell the software which are fitted in `helmet/config.py`: `SONAR_MOUNT = {"SL": ("LEFT", 5.0)}`
-(add `"SR": ("RIGHT", 5.0)` for the right one).
+Tell the software which are fitted in `helmet/config.py`:
+`SONAR_MOUNT = {"SL": ("LEFT", 5.0), "SR": ("RIGHT", 5.0)}` (remove one that isn't wired).
 
 **Pipeline (`helmet/fusion.py`):** per sensor, readings are range-gated, median-filtered, and
 dropped while your head is turning; an echo that hasn't moved for 3 s is background (a wall,

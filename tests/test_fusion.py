@@ -111,7 +111,8 @@ def test_snapshot_shows_contacts():
     s = snapshot.build([], 1.0, hud_state={}, contacts=fu.contacts)
     car = s["cars"][0]
     assert car["id"] == "sonar-SL" and car["label"] == "unknown" and car["sonar_only"] and car["x"] < 0
-    assert s["sonar_mount"] == {"SL": {"zone": "LEFT", "yaw": 5.0, "offset": cfg.SONAR_OFFSET_M}}
+    assert s["sonar_mount"]["SL"] == {"zone": "LEFT", "yaw": 5.0, "offset": cfg.SONAR_OFFSET_M}
+    assert s["sonar_mount"]["SR"]["zone"] == "RIGHT"
     print(f"  snapshot: unknown object at x={car['x']} m, measured gap {car['measured']} m")
 
 
@@ -149,7 +150,8 @@ def test_sim_car_passes():
     fires, contacts = get("passing on the left, normal gap")
     assert contacts and all(t == 2 and conf for t, conf, _, _ in contacts), contacts[:5]
     assert not any(t == 3 for t, _, _ in fires)
-    assert not get("Close pass on the right")[1], "no right sensor fitted: no right contacts"
+    fires, contacts = get("Close pass on the right")                  # right sensor: measured too
+    assert any(t == 3 and conf and abs(clr - 0.35) < 0.08 for t, conf, clr, _ in contacts), contacts[:5]
     assert not any(c for k, (f, c) in out.items() if "directly behind" in k), "car behind never reaches the side"
     passes = [line for line in log.splitlines() if line.startswith("[PASS]")]
     print("  " + "\n  ".join(passes))

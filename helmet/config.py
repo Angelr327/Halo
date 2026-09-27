@@ -148,8 +148,8 @@ SONAR_MAX_CM = 300                # ultrasonic readings beyond this are treated 
 
 # ---------------------------------------------------------------- ultrasonic fusion (side sensors)
 # Which sensors are fitted: name -> (side, degrees angled backward from pointing straight out).
-# Names match the firmware (SL = left, SR = right). Add "SR": ("RIGHT", 5.0) when it's wired.
-SONAR_MOUNT = {"SL": ("LEFT", 5.0)}
+# Names match the firmware (SL = left, SR = right). Remove one if it isn't wired.
+SONAR_MOUNT = {"SL": ("LEFT", 5.0), "SR": ("RIGHT", 5.0)}
 SONAR_OFFSET_M = 0.12             # sensor's distance from the helmet centreline
 SONAR_MIN_M = 0.05
 SONAR_STATIC_S = 3.0              # an echo that hasn't moved this long is background (wall, backpack)
