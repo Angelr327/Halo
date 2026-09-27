@@ -6,6 +6,7 @@ showing, and the ultrasonic readings. The phone draws the 3D scene from these nu
 the Pi never renders or sends video for the view.
 
 Coordinates are the rider's: x = metres to the right (negative = left), z = metres behind.
+The optional chair demo uses those drawing axes with illustrative, unmeasured placement.
 """
 import math
 import time
@@ -21,7 +22,8 @@ def _r(v, nd=2):
 
 
 def build(tracks, t, *, hud_state, fault=False, shaky=False, light=0, fps=0.0, det_ms=0.0,
-          link=None, profile="", captions=(), scene=None, contacts=(), collision=None, incidents=None):
+          link=None, profile="", captions=(), scene=None, contacts=(), collision=None, incidents=None,
+          front_demo=None):
     cars = []
     for tr in tracks:
         if tr.lat_m is None or tr.dist_m is None:
@@ -76,10 +78,13 @@ def build(tracks, t, *, hud_state, fault=False, shaky=False, light=0, fps=0.0, d
                       "tier": {"BRAKE": 3, "CAUTION": 2}.get(collision["state"], 0),
                       "live": True, "ttc": _r(collision.get("ttc_s")), "on_path": collision["on_path"],
                       "path": None, "alongside": False, "reason": collision["reason"]})
+    if front_demo:
+        front.extend(dict(o) for o in front_demo.get("obstacles", []))
     return {
         "t": round(t, 3),
         "cars": cars,
         "front_obstacles": front,
+        "front_demo": {k: v for k, v in front_demo.items() if k != "obstacles"} if front_demo else None,
         "collision": dict(collision) if collision else None,
         "hud": dict(hud_state),                          # exactly what the OLED is showing
         "fault": bool(fault),

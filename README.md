@@ -2,6 +2,13 @@ Created by: Sion King
 
 # Blind-spot helmet
 
+**Quick chair demo:** `python -m helmet.main --demo-person --demo-chair --stream 8080`, then
+open `http://<pi-ip>:8080/view`. Ordinary chairs seen by the front camera appear as trees;
+rear-camera people still appear as people. No printed markers or calibration files are needed.
+Trees follow the detected chairs' screen positions and apparent sizes; their placement is
+illustrative, with no measured front distance, speed, TTC, or front braking warning. The camera
+indices default to rear `1`, front `0`; override with `--camera` and `--front-camera` if needed.
+
 **Forward collision demo:** both helmet cameras can run together with calibrated,
 marker-assisted chair ranging and a **BRAKE / BRAKE** OLED warning. Start with the
 [setup, calibration, replay, and validation guide](docs/COLLISION_DEMO.md).

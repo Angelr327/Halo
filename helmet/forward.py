@@ -39,6 +39,15 @@ class ForwardEngine:
         self.times = deque(maxlen=120)
         self.detection_times = deque(maxlen=120)
 
+    @property
+    def stale_s(self):
+        return self.policy.cfg.stale_s
+
+    def capture(self, frame, t, *, age_s=0.0):
+        pose, reason = self.ranger.measure(frame)
+        self.process(frame, t, pose, reason, age_s=age_s)
+        return pose
+
     def reset(self):
         with self.lock:
             self.policy.reset()
@@ -183,12 +192,11 @@ class DualLiveSource:
             try:
                 frame, t = self.front.read(timeout=0.1)
                 if frame is None:
-                    if self.front.stale_for() > self.engine.policy.cfg.stale_s:
+                    if self.front.stale_for() > self.engine.stale_s:
                         self.engine.unavailable(time.monotonic(), "FRONT CAMERA OFFLINE")
                     continue
-                pose, reason = self.engine.ranger.measure(frame)
-                self._submit("front", (frame, t, pose))
-                self.engine.process(frame, t, pose, reason, age_s=max(0.0, time.monotonic() - t))
+                context = self.engine.capture(frame, t, age_s=max(0.0, time.monotonic() - t))
+                self._submit("front", (frame, t, context))
             except Exception as e:
                 self.engine.unavailable(time.monotonic(), f"FRONT ERROR: {type(e).__name__}")
                 print(f"[front capture] {e}")
@@ -204,14 +212,14 @@ class DualLiveSource:
                 if not self._inputs:
                     continue
                 side = preferred if preferred in self._inputs else next(iter(self._inputs))
-                frame, t, pose = self._inputs.pop(side)
+                frame, t, context = self._inputs.pop(side)
                 preferred = "front" if side == "rear" else "rear"
-            if time.monotonic() - t > self.engine.policy.cfg.stale_s:
+            if time.monotonic() - t > self.engine.stale_s:
                 continue
             try:
                 if side == "front":
                     dets = self.detector.detect(frame, class_map={56: "chair"})
-                    self.engine.associate(dets, t, pose)
+                    self.engine.associate(dets, t, context)
                 else:
                     image = cv2.flip(frame, 1) if cfg.MIRROR_VIEW else frame
                     dets = self.detector.detect(image)

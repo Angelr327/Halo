@@ -1,5 +1,17 @@
 # Helmet forward collision demo
 
+For a quick visual demo without calibration, run:
+
+```bash
+python -m helmet.main --demo-person --demo-chair --headless --stream 8080
+```
+
+Open `http://<pi-ip>:8080/view` and point the front camera at ordinary chairs. Each tracked
+chair becomes a tree; rear-camera people detection continues. `--demo-chair` uses illustrative
+placement from detection boxes and does not issue front braking warnings or measured ranges.
+It supports live cameras and is separate from `--collision`. The rest of this guide covers
+the calibrated collision demo.
+
 The `--collision` option runs both helmet cameras. It detects a **chair**, associates a known-size ArUco marker with it, estimates approach speed to that stationary target, and shows **BRAKE / BRAKE** on the OLED. The web scene deliberately draws that chair as a tree. The detector and telemetry still say `chair`.
 
 This is a calibrated, low-speed hackathon demo. It does not independently measure bike speed, know bike heading during head turns, or detect arbitrary collision hazards. There is no accelerometer, ultrasonic, GPS, cloud, or external speed-sensor dependency. The original rear-only invocation continues to work.
