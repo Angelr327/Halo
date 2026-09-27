@@ -171,9 +171,7 @@ INCIDENT_GEMINI_BUDGET = 30       # hard cap on incident analyses per session (s
 SERIAL_PORT = None                # None = auto-detect, or "COM5" / "/dev/cu.usbserial-1410"
 SERIAL_BAUD = 57600               # must match the sketch
 HEARTBEAT_S = 0.25
-BUZZERS_ENABLED = True            # short chirps: 2 with a HIGH rear buzz, FRONT_BRAKE_CHIRPS on BRAKE; False = silent
-FRONT_BRAKE_CHIRPS = 3            # chirps on both buzzers when the front warning turns to BRAKE (0 = none, max 3)
-FRONT_CHIRP_GAP_S = 1.5           # a BRAKE that flickers off and on chirps at most this often
+BUZZERS_ENABLED = False           # optional piezo buzzers on the Arduino (2 chirps with a HIGH buzz); beeps use BEEP_*
 SONAR_MAX_CM = 300                # ultrasonic readings beyond this are treated as "nothing there"
 
 # ---------------------------------------------------------------- ultrasonic fusion (side sensors)
@@ -206,6 +204,17 @@ HUD_BLINK_HZ = 4.0                # HIGH blinks filled/outline at this rate
 TTS_ENABLED = True
 TTS_RATE = 200                    # words per minute (macOS/Linux); Windows maps to SAPI rate
 TTS_PREFIX = ""                   # e.g. "Hey. " if your Bluetooth headset clips the first word
+
+# ---------------------------------------------------------------- beeps (same audio output as speech)
+# AirPods or any Bluetooth/USB speaker the Pi plays through. No buzzer hardware needed.
+BEEP_ENABLED = True
+BEEP_TIERS = (3,)                 # rear alert tiers that beep: 3 = HIGH (add 2 for MEDIUM too)
+BEEP_FRONT_BRAKE = True           # three quick, higher beeps when the front warning turns to BRAKE
+BEEP_REPEAT_S = 4.0               # the same warning (rear left/right/behind, front) beeps at most this often
+BEEP_MIN_GAP_S = 1.0              # a rear beep is skipped this soon after any other beep
+BEEP_VOLUME = 0.3                 # fraction of full scale; the earbuds' own volume still applies
+BEEP_KEEP_AWAKE = True            # keep the output open so Bluetooth doesn't cut off short beeps
+BEEP_LEAD_IN_S = 0.25             # silence before each beep when the output can't be kept open
 
 # ---------------------------------------------------------------- overlay
 PANEL_WIDTH = 400

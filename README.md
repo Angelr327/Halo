@@ -3,13 +3,13 @@ Created by: Sion King
 # Blind-spot helmet
 
 A bike helmet that watches the road behind you. A rear camera runs YOLO on a Raspberry Pi, and
-the helmet warns you with left or right vibration, a short chirp for the most urgent threats, a
-rear light aimed at the driver, a transparent heads-up display and short spoken alerts. Gemini
-writes descriptions and incident reports on the side. It never decides whether an alert fires.
+the helmet warns you with left or right vibration, a short beep in your earbuds for the most
+urgent threats, a rear light aimed at the driver, a transparent heads-up display and short
+spoken alerts. Gemini writes descriptions and incident reports on the side. It never decides whether an alert fires.
 
 `--collision` adds the front camera. It uses the same box-growth time to contact as the rear,
 so it needs no calibration. When something ahead is 2.8 s away, the display shows BRAKE and
-the buzzers chirp three times. The 3D view draws front and rear traffic together. The guide,
+you hear three quick beeps. The 3D view draws front and rear traffic together. The guide,
 test cases and roadmap are in [FRONT_CAMERA_ONLY.md](docs/FRONT_CAMERA_ONLY.md), and
 `--sim --collision` runs it with no hardware. [COLLISION_DEMO.md](docs/COLLISION_DEMO.md) covers an older marker mode that measures
 exact metres but needs calibration. The rear-only commands below work without either.
@@ -48,8 +48,19 @@ On a Pi (`config.IS_PI`), these defaults change automatically:
 - A Pi Camera Module is used if one is present, otherwise the USB webcam. The Camera Module 3
   Wide is light and sees about 120°. Force a choice with `--camera-source usb|picamera2`.
 - It runs headless with the web view, and skips drawing entirely when nobody is watching.
-- Speech goes through `espeak-ng` on the default audio output. Pair the Bluetooth headset in
-  the desktop's Bluetooth menu or with `bluetoothctl`.
+- Speech (`espeak-ng`) and beeps go to the default audio output: AirPods, or any Bluetooth or
+  USB speaker. Pair it in the desktop's Bluetooth menu or with `bluetoothctl`, then press `b`
+  (Test beeps on the web page). You should hear two beeps in your left ear, two in your right,
+  then three quicker, higher ones in both.
+- A HIGH rear alert beeps twice on its side, and a front BRAKE beeps three times. The same
+  warning beeps at most every 4 s, and a rear beep never follows another beep within 1 s, so a
+  busy road doesn't turn it into a nag. MEDIUM and LOW are silent (vibration and the HUD only).
+  The settings are the `BEEP_*` lines in `config.py`.
+- Bluetooth earbuds go to sleep after a few seconds of silence and cut off the start of the
+  next sound. So the app keeps the audio output open and plays silence between beeps. The
+  startup line should say `Beeps: default output, kept awake`. If it names a player such as
+  `aplay` instead, install `sounddevice` (in `requirements.txt`), or the beeps get a 0.25 s
+  silent lead-in (`BEEP_LEAD_IN_S`) to survive the wake-up.
 
 To start at boot with no laptop, see `deploy/helmet.service`.
 
@@ -98,6 +109,7 @@ python -m helmet.main --sim --collision        # both cameras scripted: front + 
 | g | "What's behind me?" (Gemini, or local answer offline) | k | kill heartbeat → Arduino failsafe |
 | v | voice question (3 s, laptop mic) | x | Gemini on/off |
 | t | haptic test: left, right, both | a | describe ↔ agent mode |
+| b | beep test: left, right, front BRAKE | | |
 | l | cycle light override | m | mirror on/off |
 | p | cycle sensitivity profile | c | hot-reload `config.py` |
 | space | pause video | r | record the debug window to MP4 |
@@ -123,8 +135,8 @@ takes power from those rails.
 | Ultrasonic BR (back, right of centre, optional) | TRIG / ECHO | A2 / A3 |
 | Left vibration motor | via NPN (below), or module IN | D5 |
 | Right vibration motor | via NPN, or module IN | D9 |
-| Left buzzer | I/O (3-pin module), or via NPN | D4 |
-| Right buzzer | I/O, or via NPN | D12 |
+| Left buzzer (optional, muted unless `BUZZERS_ENABLED`) | I/O (3-pin module), or via NPN | D4 |
+| Right buzzer (optional) | I/O, or via NPN | D12 |
 | Optional button | one leg | D3 (other leg → GND) |
 | Optional NeoPixel rear light | DIN | D2 (330 Ω in series if you have one) |
 | All ultrasonics, modules | VCC / GND | + rail / − rail |
@@ -150,9 +162,9 @@ goes straight to the Uno pin.
 Check the wiring before mounting. Flash the sketch from the Pi with
 `bash scripts/flash_arduino.sh` (no Arduino IDE needed; `bash scripts/flash_arduino.sh
 hcsr04_test` for the sensor test), then run `python -m tools.bench serial` on the Pi. You should
-feel left then right at power-up. `l` and `r` buzz each side (strong also chirps twice), `c`
-chirps both buzzers like a front BRAKE, `u` prints the four distances (wave a hand in front of
-each sensor), and `z0` mutes the buzzers. Total draw is roughly 250 mA from the Pi's USB (see
+feel left then right at power-up. `l` and `r` buzz each side, and `u` prints the four
+distances (wave a hand in front of each sensor). If you wired the optional buzzers, `z1`
+unmutes them: a strong buzz then chirps twice and `c` chirps both. Total draw is roughly 250 mA from the Pi's USB (see
 the power note above).
 
 ### Standalone two-sensor test
@@ -363,9 +375,10 @@ to your left.
 `M<n>` light 0 normal / 1 alert / 2 danger (sent every 250 ms, which doubles as the heartbeat) ·
 `C<n>` n short chirps (1 to 3) on both buzzers, no vibration · `Z1`/`Z0` buzzers on / muted ·
 `F1`/`F0` host fault · `X` all off · `?` status.
-A strong buzz (3) also chirps twice on its side, 40 ms each. The buzzers stay quiet for gentle
-and medium, and a side that just chirped waits 1 s before chirping again. Set
-`CHIRPS_FOR_LEVEL` in the sketch to change that.
+The buzzers are optional. The Pi mutes them at startup unless `BUZZERS_ENABLED = True`, since
+the beeps go to the earbuds. When they're on, a strong buzz (3) also chirps twice on its side,
+40 ms each, and a side that just chirped waits 1 s before chirping again (`CHIRPS_FOR_LEVEL`
+in the sketch).
 The board replies `READY`, `BTN`, `FAILSAFE`, `LINK OK` or `ERR <line>`.
 If no command arrives for 1.5 s, the light becomes a normal flashing bike light and both motors
 give a long buzz, with a beep.
@@ -413,7 +426,7 @@ with the camera level and pointing straight back.
 6. Test shake. Wear the helmet, nod and turn your head while the teammate stands still at 5 m.
    `SHAKY` should light up during the movement. No MED or HIGH may fire, and the zone must not
    flip. Raise `SHAKE_GATE_FRAC` if normal riding posture keeps triggering SHAKY.
-7. Check the tiers. Jog at the camera from 10 m: HIGH (red, both motors, two chirps, strobe,
+7. Check the tiers. Jog at the camera from 10 m: HIGH (red, both motors, two beeps, strobe,
    "Person behind!") should fire about 2 to 3 s out. Walk past on the left line: MED left, not
    HIGH. Walk past 0.95 m to the left: HIGH left ("close pass"; 0.7 m is inside the lane, so that one
    is HIGH "behind"). Start 2 m left and walk diagonally into the centre line: HIGH "cutting in"
@@ -445,6 +458,9 @@ Commit the final values with a message like "calibrated at venue".
 - No Arduino: use a data-capable USB cable, install the CH340 driver on Windows or macOS, close
   the Arduino IDE serial monitor (only one program can hold the port), or pass `--port`.
 - Speech clips the first word (Bluetooth power saving): set `TTS_PREFIX = "Hey. "`.
+- No beeps: check the startup line after `Beeps:`, press `b`, and make sure the earbuds are the
+  default output (`wpctl status` on the Pi). `[ALERT] ... + beep` in the log means a beep was
+  sent. An alert without `+ beep` was held back by a cooldown.
 - Don't use the bone-conduction headset's mic. It switches Bluetooth into call mode and wrecks
   the audio. Use the laptop mic for `v`.
 - Gemini 429 errors: raise `GEMINI_MIN_INTERVAL_S` to 60 / (your RPM in AI Studio).

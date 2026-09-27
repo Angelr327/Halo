@@ -29,7 +29,7 @@ from .fusion import SonarFusion
 from .hud import Hud
 from .incidents import IncidentRecorder
 from . import snapshot
-from .outputs import FrontChirp, HelmetLink, Speaker
+from .outputs import Beeper, HelmetLink, Speaker
 from .overlay import Overlay
 from .perception import CENTER, LEFT, RIGHT, GlobalMotion, Tracker, VehicleDetector, update_metrics
 from .risk import SPOKEN_LABEL, AlertPolicy, SceneTrigger
@@ -184,6 +184,7 @@ def main():
         detector = VehicleDetector()
     motion, tracker, policy, scene = GlobalMotion(), Tracker(), AlertPolicy(), SceneTrigger()
     link, speaker, gateway, overlay = HelmetLink(args.port), Speaker(), GeminiGateway(), Overlay()
+    beeper = Beeper()
     hud = Hud(enabled=not args.no_hud)
     forward = None
     if args.collision:
@@ -201,7 +202,6 @@ def main():
             print("Front warning: camera-only (no calibration): BRAKE when an object ahead is "
                   f"{forward.settings.brake_ttc_s:.1f} s from contact")
     fusion = SonarFusion()
-    front_chirp = FrontChirp()
     recorder = IncidentRecorder(client=gateway.client)
     st = State()
     headless = cfg.HEADLESS
@@ -222,7 +222,7 @@ def main():
                     publish=lambda frame: streamer.publish_camera("front", frame))
     print(f"Detector: {detector.model_name} @ {cfg.IMGSZ} | Camera: {type(source).__name__} | "
           f"Serial: {link.status} | Gemini: {gateway.status if not gateway.available else cfg.GEMINI_MODEL}")
-    print(f"HUD: {hud.status}")
+    print(f"HUD: {hud.status} | Beeps: {beeper.status}")
     if streamer:
         tok = f"?t={cfg.STREAM_TOKEN}" if cfg.STREAM_TOKEN else ""
         print(f"Web view: http://{local_ip()}:{cfg.STREAM_PORT}/{tok}")
@@ -268,7 +268,9 @@ def main():
 
     def execute_fire(f):
         link.buzz(f.side, f.tier)
-        print(f"[ALERT] t={f.t:.2f} #{f.track_id} {f.label} {f.zone} tier={f.tier} ({f.reason})")
+        beeped = beeper.rear(f.tier, f.side)
+        print(f"[ALERT] t={f.t:.2f} #{f.track_id} {f.label} {f.zone} tier={f.tier} ({f.reason})"
+              + (" + beep" if beeped else ""))
         if f.tier == 3 and policy.may_speak_local(f.t):
             speaker.say(f.phrase(), priority=0, max_age=1.5, source="local")
         wants = f.tier in cfg.DESCRIBE_TIERS or (f.tier == 2 and f.label in cfg.DESCRIBE_MEDIUM_FOR)
@@ -374,6 +376,9 @@ def main():
         elif key == ord("t"):
             st.scheduled += [(nonlocal_now, "L2"), (nonlocal_now + 0.8, "R2"), (nonlocal_now + 1.6, "B3")]
             speaker.say("Left. Right. Both.", priority=2, max_age=3, source="system")
+        elif key == ord("b"):
+            print(f"beep test (rear left, rear right, front BRAKE): {beeper.status}")
+            beeper.test()
         elif key == ord("l"):
             seq = [None, 0, 1, 2]
             st.light_override = seq[(seq.index(st.light_override) + 1) % len(seq)]
@@ -423,7 +428,8 @@ def main():
             frame, t = (None, None) if st.sim_fault else source.read(timeout=0.1)
             now = time.monotonic()
             if forward is not None:
-                front_chirp.update(hud.collision, link, now)      # BRAKE chirps even if the rear stalls
+                if beeper.front(hud.collision, now):              # BRAKE beeps even if the rear stalls
+                    print("[BEEP] front BRAKE")
             if streamer and forward is not None:
                 front_frame, captured_at = forward.camera_frame()
                 streamer.publish_camera("front", front_frame, captured_at=captured_at if source.is_live else now)
@@ -549,6 +555,7 @@ def main():
         if log_file:
             log_file.close()
         link.close()
+        beeper.close()
         hud.close()
         recorder.close()
         source.release()

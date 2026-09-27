@@ -5,8 +5,8 @@
   Wiring (see README "Wiring (Arduino Uno + Pi)"). Put 5V and GND on the breadboard rails.
     Left vibration motor   D5 -> 1k -> NPN base (or module IN)   motor between 5V and collector, diode across it
     Right vibration motor  D9 -> same
-    Left buzzer            D4  (3-pin module: I/O pin; bare buzzer: through an NPN like the motors)
-    Right buzzer           D12
+    Left buzzer (optional) D4  (3-pin module: I/O pin; bare buzzer: through an NPN like the motors)
+    Right buzzer (optional) D12   (the Pi sends Z0 unless BUZZERS_ENABLED; beeps go to its earbuds)
     Ultrasonic SL (left side, pointing out ~5 deg back)   TRIG D7   ECHO D6
     Ultrasonic SR (right side, pointing out ~5 deg back)  TRIG D11  ECHO D10
       (matches the team's wiring and firmware/hcsr04_test, so the test and helmet sketches agree)
@@ -21,7 +21,7 @@
     L<n> R<n> B<n>  haptic on left / right / both: 0 stop, 1 gentle, 2 medium, 3 strong, 4 fault
     M<n>            rear light: 0 normal flash, 1 alert, 2 danger. Host sends this every 250 ms (heartbeat)
     F1 / F0         host reports a fault (camera) / clears it
-    C<n>            n short chirps (1-3) on both buzzers, no vibration (front BRAKE); C0 stops them
+    C<n>            n short chirps (1-3) on both buzzers, no vibration (bench test); C0 stops them
     Z1 / Z0         buzzers on / muted. A STRONG buzz adds two short chirps on the same side;
                     FAULT keeps a long beep with the vibration
     X               everything off (bench testing)

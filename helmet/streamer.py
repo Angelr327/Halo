@@ -29,7 +29,7 @@ import numpy as np
 
 from . import config as cfg
 
-BUTTONS = [("g", "What's behind me?"), ("v", "Voice question"), ("t", "Test motors"),
+BUTTONS = [("g", "What's behind me?"), ("v", "Voice question"), ("t", "Test motors"), ("b", "Test beeps"),
            ("l", "Light override"), ("p", "Profile"), ("f", "Simulate camera fault"),
            ("k", "Kill heartbeat"), ("x", "Gemini on/off"), ("a", "Describe / agent"),
            ("m", "Mirror"), ("c", "Reload config"), ("d", "Metrics panel"), (" ", "Pause video"),

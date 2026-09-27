@@ -5,6 +5,7 @@
   python -m tools.bench yolo [--models yolo26n.pt yolov8n.pt] [--sizes 256 320 416] [--ncnn]
   python -m tools.bench yolo --video clip.mp4     benchmark without any camera attached
   python -m tools.bench check [--seconds 10]      every camera + the ultrasonic sensor(s), all at once
+  python -m tools.bench beep                      the alert beeps in your earbuds: left, right, front BRAKE
 """
 import argparse
 import glob
@@ -44,7 +45,7 @@ def serial_cmd(args):
             time.sleep(cfg.HEARTBEAT_S)
     threading.Thread(target=heartbeat, daemon=True).start()
     print("Commands: l / r / b = strong buzz left/right/both, 1 2 3 4 = pattern on both,\n"
-          "          c = three chirps on both buzzers (front BRAKE), no vibration,\n"
+          "          c = three chirps on the optional buzzers (type z1 first), no vibration,\n"
           "          0 1 2 prefixed with m (m0 m1 m2) = light mode, f = fault buzz,\n"
           "          s = stop heartbeat (failsafe should trigger in 1.5 s), h = resume, q = quit,\n"
           "          u = print ultrasonic distances on/off, z0 / z1 = mute / unmute buzzers,\n"
@@ -397,6 +398,23 @@ def yolo_cmd(args):
     print("Aim for >= 10 FPS end to end. Pick the largest imgsz that keeps you there.")
 
 
+def beep_cmd(args):
+    from helmet.outputs import AudioOut
+    out = AudioOut()
+    print(f"Beeps: {out.status}")
+    try:
+        for kind, side, what in (("rear", "L", "rear alert on your LEFT: two beeps, left ear"),
+                                 ("rear", "R", "rear alert on your RIGHT: two beeps, right ear"),
+                                 ("rear", "B", "rear alert BEHIND: two beeps, both ears"),
+                                 ("front", "B", "front BRAKE: three quicker, higher beeps, both ears")):
+            print(f"  {what}")
+            out.play(kind, side)
+            time.sleep(1.5)
+    finally:
+        out.close()
+    print("Nothing? Check the earbuds are the default output (wpctl status). Cut-off beeps: see the README.")
+
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -414,5 +432,6 @@ if __name__ == "__main__":
     k.add_argument("--seconds", type=float, default=10.0)
     k.add_argument("--port")
     k.add_argument("--expect-cameras", type=int, default=2)
+    sub.add_parser("beep")
     a = ap.parse_args()
-    {"serial": serial_cmd, "camera": camera_cmd, "yolo": yolo_cmd, "check": check_cmd}[a.cmd](a)
+    {"serial": serial_cmd, "camera": camera_cmd, "yolo": yolo_cmd, "check": check_cmd, "beep": beep_cmd}[a.cmd](a)

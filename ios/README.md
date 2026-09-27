@@ -45,7 +45,7 @@ about four times a second and shows what the helmet sees.
 ## How the work is split
 
 The helmet owns the fast safety loop: camera and ultrasonic readings, object detection and
-tracking, left/right hazard decisions, the buzzers, lights, haptics and OLED, the incident video
+tracking, left/right hazard decisions, the beeps, lights, haptics and OLED, the incident video
 buffer, and staying safe when the phone isn't there.
 
 The phone owns the features that face the rider or need the internet: GPS, speed and heading,
