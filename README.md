@@ -139,6 +139,26 @@ You should feel left then right at power-up; `l` / `r` buzz each side (strong al
 `u` prints the four distances (wave a hand in front of each sensor); `z0` mutes the buzzers.
 Total draw is roughly 250 mA from the Pi's USB (see the power note above).
 
+### Standalone two-sensor test
+
+`firmware/hcsr04_test/hcsr04_test.ino` tests both helmet sensors with this wiring:
+
+| Sensor | TRIG | ECHO |
+|---|---|---|
+| Left | D7 | D6 |
+| Right | D11 | D10 |
+
+Connect both sensors' VCC pins to the breadboard's + rail (Arduino **5V**) and both
+GND pins to the − rail (Arduino **GND**). Upload the sketch in the Arduino IDE or run
+`bash scripts/flash_arduino.sh hcsr04_test`, then open Serial Monitor at **9600 baud**.
+Each line shows separate **LEFT** and **RIGHT** distances (or `no echo`) and echo success
+percentages. Pings alternate with a 65 ms quiet gap; the built-in LED lights if either
+sensor reads under 50 cm.
+
+This test wiring differs from the main helmet wiring above: the main firmware uses
+D10/D11 for the right motor/buzzer. Restore the main wiring before uploading
+`helmet_arduino.ino` again. Close Serial Monitor before using the helmet app or bench tool.
+
 ## Camera + ultrasonic fusion
 
 The rear camera sees about ±33° either side of straight back, so a car right **beside** you is
