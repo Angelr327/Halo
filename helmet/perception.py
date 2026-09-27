@@ -239,6 +239,7 @@ class Track:
     on_path: bool = False      # predicted to end up inside your corridor
     clearance_m: float = None
     pred_clearance_m: float = None
+    measured_clearance_m: float = None   # from a side ultrasonic sensor (fusion.py), when beside you
     dist_m: float = None
     zone: str = None
     zone_pending: str = None

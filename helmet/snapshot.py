@@ -21,7 +21,7 @@ def _r(v, nd=2):
 
 
 def build(tracks, t, *, hud_state, fault=False, shaky=False, light=0, fps=0.0, det_ms=0.0,
-          link=None, profile="", captions=(), scene=None):
+          link=None, profile="", captions=(), scene=None, contacts=()):
     cars = []
     for tr in tracks:
         if tr.lat_m is None or tr.dist_m is None:
@@ -42,6 +42,23 @@ def build(tracks, t, *, hud_state, fault=False, shaky=False, light=0, fps=0.0, d
             "live": bool(tr.matched_now),
             "reason": tr.reason,
         })
+    # Side-sensor contacts (fusion.py): a camera track that is now beside you gets its measured
+    # gap and is drawn where the sensor put it; an echo the camera never saw is an "unknown".
+    by_id = {c["id"]: c for c in cars}
+    for k in contacts:
+        beside = {"x": _r(k.x_center), "z": _r(max(k.behind_m, 0.2)), "measured": _r(k.clearance_m)}
+        entry = by_id.get(k.track_id) if k.track_id is not None else None
+        if entry is not None:
+            entry["measured"] = beside["measured"]
+            if k.tier > entry["tier"]:
+                entry["tier"], entry["reason"] = k.tier, k.reason
+            if entry["alongside"] or not entry["live"]:
+                entry.update(beside)
+            continue
+        cars.append({"id": k.track_id if k.track_id is not None else f"sonar-{k.sensor}", "label": k.label,
+                     "zone": k.zone, "tier": k.tier, "ttc": None, "path": None, "on_path": False,
+                     "alongside": True, "live": True, "reason": k.reason, "sonar_only": k.track_id is None,
+                     **beside})
     sonar = {}
     if link is not None and link.sonar_fresh():
         sonar = {k: _r(v) for k, v in link.sonar.items()}
@@ -67,4 +84,5 @@ def build(tracks, t, *, hud_state, fault=False, shaky=False, light=0, fps=0.0, d
         "scene": scene,
         "corridor_half_m": cfg.RIDER_HALF_WIDTH_M + cfg.CORRIDOR_MARGIN_M,
         "demo_person": bool(cfg.DEMO_PERSON_AS_VEHICLE),   # people stand in for vehicles (stationary demo)
+        "sonar_mount": {k: {"zone": z, "yaw": y, "offset": cfg.SONAR_OFFSET_M} for k, (z, y) in cfg.SONAR_MOUNT.items()},
     }

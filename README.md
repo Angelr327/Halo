@@ -102,19 +102,21 @@ part below takes power from those rails.
 
 | Part | Part pin | Uno pin |
 |---|---|---|
-| Ultrasonic SL (side-left, angled ~45° back) | TRIG / ECHO | D7 / D8 |
-| Ultrasonic SR (side-right, angled ~45° back) | TRIG / ECHO | D11 / D12 |
-| Ultrasonic BL (back, left of centre) | TRIG / ECHO | A0 / A1 |
-| Ultrasonic BR (back, right of centre) | TRIG / ECHO | A2 / A3 |
+| Ultrasonic SL (left side, pointing out ~5° back) | TRIG / ECHO | D6 / D7 |
+| Ultrasonic SR (right side, pointing out ~5° back) | TRIG / ECHO | D8 / D12 |
+| Ultrasonic BL (back, left of centre, optional) | TRIG / ECHO | A0 / A1 |
+| Ultrasonic BR (back, right of centre, optional) | TRIG / ECHO | A2 / A3 |
 | Left vibration motor | via NPN (below), or module IN | D5 |
-| Right vibration motor | via NPN, or module IN | D6 |
+| Right vibration motor | via NPN, or module IN | D10 |
 | Left buzzer | I/O (3-pin module), or via NPN | D9 |
-| Right buzzer | I/O, or via NPN | D10 |
+| Right buzzer | I/O, or via NPN | D11 |
 | Optional button | one leg | D3 (other leg → GND) |
 | Optional NeoPixel rear light | DIN | D2 (330 Ω in series if you have one) |
 | All ultrasonics, modules | VCC / GND | + rail / − rail |
 
 The Uno is 5V, so the HC-SR04 ECHO pins connect directly (no voltage dividers, unlike the Pi).
+Mark each wired sensor `true` in `SONAR_FITTED` in the sketch (only SL is on by default); only
+fitted sensors are pinged, so one sensor updates ~33 times a second, two ~16.
 
 **Bare vibration disc (2 wires): one NPN transistor each** (2N2222 / PN2222 / S8050).
 Never drive a motor straight from a pin; it draws more than a pin can give.
@@ -134,6 +136,35 @@ Check it before mounting: flash the sketch from the Pi with `bash scripts/flash_
 You should feel left then right at power-up; `l` / `r` buzz each side (strong also beeps);
 `u` prints the four distances (wave a hand in front of each sensor); `z0` mutes the buzzers.
 Total draw is roughly 250 mA from the Pi's USB (see the power note above).
+
+## Camera + ultrasonic fusion
+
+The rear camera sees about ±33° either side of straight back, so a car right **beside** you is
+outside its view. The side ultrasonic sensors see exactly there and measure the gap to a few cm.
+The camera says *what* it is and *that it approached*; the sensor says *how close* it passed.
+
+**Mounting:** one sensor per side at the widest point of the helmet, pointing **straight out,
+level** (at most ~10-15° back; the default config assumes 5°). A car's flat side reflects sound
+away at steep angles, so angled-back sensors miss cars. Tilt slightly up, never down, and check
+that each reads `---` with nobody around (a steady reading = it sees your shoulder or backpack).
+Tell the software which are fitted in `helmet/config.py`: `SONAR_MOUNT = {"SL": ("LEFT", 5.0)}`
+(add `"SR": ("RIGHT", 5.0)` for the right one).
+
+**Pipeline (`helmet/fusion.py`):** per sensor, readings are range-gated, median-filtered, and
+dropped while your head is turning; an echo that hasn't moved for 3 s is background (a wall,
+your backpack) and ignored. A moving echo becomes a *contact*, linked to the camera track that
+was just on that side (at the frame edge, or lost from view in the last 1.5 s):
+
+| Situation | Alert |
+|---|---|
+| The camera saw it approach, the sensor measures it beside you inside the close-pass distance (1.0 m, 0.4 m for people) | **HIGH** "close pass 0.32 m measured" |
+| Same, but a wider gap | **MED** "beside you 1.35 m measured" |
+| Moving echo under 1.5 m the camera never saw | **MED** "object beside you" (never HIGH: it can't tell a car from a pole) |
+| Camera fault | sensor contacts keep giving MED side alerts |
+
+Every pass is logged, e.g. `[PASS] car passed on your left at 0.72 m`. In the 2.5D view the car
+moves up beside the bike with a "0.72 m gap" label; an echo the camera never saw is drawn as an
+orange column. `--sim` and `--sim --demo-person` include hand-off scenes with simulated echoes.
 
 ## 2.5D view (phone or laptop)
 

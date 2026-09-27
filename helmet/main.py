@@ -25,6 +25,7 @@ import cv2
 
 from . import config as cfg
 from .gemini_gateway import GeminiEvent, GeminiGateway, facts_for, prepare_frame, record_wav
+from .fusion import SonarFusion
 from .hud import Hud
 from . import snapshot
 from .outputs import HelmetLink, Speaker
@@ -155,6 +156,7 @@ def main():
     motion, tracker, policy, scene = GlobalMotion(), Tracker(), AlertPolicy(), SceneTrigger()
     link, speaker, gateway, overlay = HelmetLink(args.port), Speaker(), GeminiGateway(), Overlay()
     hud = Hud(enabled=not args.no_hud)
+    fusion = SonarFusion()
     st = State()
     headless = cfg.HEADLESS
     streamer = Streamer(cfg.STREAM_PORT) if cfg.STREAM_PORT else None
@@ -270,7 +272,7 @@ def main():
         streamer.publish_state(snapshot.build(
             tracker.tracks, st.t, hud_state=hud.state, fault=st.fault, shaky=shaky, light=st.light,
             fps=st.fps, det_ms=detector.last_ms, link=link, profile=policy.profile_name,
-            captions=speaker.captions, scene=getattr(source, "title", None)))
+            captions=speaker.captions, scene=getattr(source, "title", None), contacts=fusion.contacts))
 
     def poll_key():
         k = cv2.waitKey(1) & 0xFF if not headless else 255
@@ -365,7 +367,10 @@ def main():
                     set_fault(True)
                 if st.fault:
                     st.light = 0                      # fail-visible: normal flashing bike light
-                hud.update([], fault=st.fault)
+                fusion.update([], now, link, now=now)            # side sensors still work with no camera
+                for f in policy.evaluate_contacts(fusion.contacts, [], now, False):
+                    execute_fire(f)
+                hud.update([], fault=st.fault, extra=fusion.hud_state())
                 publish_snapshot(now)
                 link.tick(st.light if st.light_override is None else st.light_override)
                 apply_gemini()
@@ -398,10 +403,15 @@ def main():
                 if tr.matched_now:
                     update_metrics(tr, t, w, vp, shaky, frame_h=h)
 
-            for f in policy.evaluate(tracker.tracks, t, shaky):
+            if hasattr(source, "sonar_readings"):              # simulator: fake side-sensor echoes
+                link.inject_sonar(source.sonar_readings())
+            fusion.update(tracker.tracks, t, link, shaky, now=now)
+            fires = policy.evaluate(tracker.tracks, t, shaky)
+            fires += policy.evaluate_contacts(fusion.contacts, tracker.tracks, t, shaky)
+            for f in sorted(fires, key=lambda f: -f.tier):
                 execute_fire(f)
             st.light = policy.light_level(tracker.tracks, t)
-            hud.update(tracker.tracks)
+            hud.update(tracker.tracks, extra=fusion.hud_state())
             publish_snapshot(now, shaky)
 
             st.frames.append(frame)

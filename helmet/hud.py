@@ -108,10 +108,14 @@ class Hud:
         """What the panel is showing now: {zone: tier}, after the hold."""
         return dict(self._state)
 
-    def update(self, tracks, fault=False):
-        """Called once per frame from the main loop. Cheap: no drawing, no I/O."""
+    def update(self, tracks, fault=False, extra=None):
+        """Called once per frame from the main loop. Cheap: no drawing, no I/O.
+        `extra` adds {zone: tier} from other sensors (side ultrasonic contacts)."""
         now = time.monotonic()
-        for zone, tier in threat_state(tracks).items():
+        state = threat_state(tracks)
+        for zone, tier in (extra or {}).items():
+            state[zone] = max(state.get(zone, 0), tier)
+        for zone, tier in state.items():
             old, until = self._held.get(zone, (0, 0.0))
             self._held[zone] = (max(tier, old if now < until else 0), now + cfg.HUD_HOLD_S)
         self._state = {z: tier for z, (tier, until) in self._held.items() if now < until}

@@ -15,7 +15,7 @@ from .perception import CENTER, LEFT, RIGHT
 
 SIDE_CODE = {LEFT: "L", RIGHT: "R", CENTER: "B"}
 SPOKEN_LABEL = {"car": "Car", "truck": "Truck", "bus": "Bus", "motorcycle": "Motorbike",
-                "bicycle": "Bike", "person": "Person"}
+                "bicycle": "Bike", "person": "Person", "unknown": "Something"}
 SPOKEN_SIDE = {LEFT: "left", RIGHT: "right", CENTER: "behind"}
 
 
@@ -119,6 +119,30 @@ class AlertPolicy:
             tr.fired_tier, tr.fired_t = tier, t
             fires.append(Fire(tr.id, tr.label, tr.zone, tier, side, reason, t))
         fires.sort(key=lambda f: -f.tier)
+        return fires
+
+    def evaluate_contacts(self, contacts, tracks, t, shaky):
+        """Alerts from side-sensor contacts (fusion.py). A contact linked to a camera track shares
+        that track's cooldown, so the same vehicle never alerts twice for the same tier."""
+        by_id = {tr.id: tr for tr in tracks}
+        fires = []
+        for c in contacts:
+            if c.tier == 0 or (shaky and c.tier < 3):
+                continue
+            owner = by_id.get(c.track_id) or c
+            cooldown = cfg.COOLDOWN_S[c.tier] * self.profile["cooldown_scale"]
+            if not (c.tier > owner.fired_tier or t - owner.fired_t >= cooldown):
+                continue
+            side = SIDE_CODE[c.zone]
+            if not self._side_free(side, c.tier, t):
+                continue
+            self.side_last[side] = t
+            owner.fired_tier, owner.fired_t = c.tier, t
+            c.fired_tier, c.fired_t = c.tier, t
+            level = 2 if c.tier >= 3 else 1
+            self.light_until[level] = t + cfg.LIGHT_HOLD_S[level]
+            fires.append(Fire(c.track_id if c.track_id is not None else -1, c.label, c.zone, c.tier, side,
+                              c.reason, t))
         return fires
 
     def light_level(self, tracks, t):

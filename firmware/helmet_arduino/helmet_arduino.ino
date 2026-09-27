@@ -4,13 +4,14 @@
 
   Wiring (see README "Wiring (Arduino Uno + Pi)"). Put 5V and GND on the breadboard rails.
     Left vibration motor   D5 -> 1k -> NPN base (or module IN)   motor between 5V and collector, diode across it
-    Right vibration motor  D6 -> same
+    Right vibration motor  D10 -> same
     Left buzzer            D9  (3-pin module: I/O pin; bare buzzer: through an NPN like the motors)
-    Right buzzer           D10
-    Ultrasonic SL (side-left, angled back)   TRIG D7   ECHO D8
-    Ultrasonic SR (side-right, angled back)  TRIG D11  ECHO D12
+    Right buzzer           D11
+    Ultrasonic SL (left side, pointing out ~5 deg back)   TRIG D6   ECHO D7
+    Ultrasonic SR (right side, pointing out ~5 deg back)  TRIG D8   ECHO D12
     Ultrasonic BL (back, left of centre)     TRIG A0   ECHO A1
     Ultrasonic BR (back, right of centre)    TRIG A2   ECHO A3
+      (only sensors marked true in SONAR_FITTED are pinged; the rest report -1)
     NeoPixel stick (optional rear light)     DIN D2 (through 330 ohm if you have one)
     Optional button                          D3 -> button -> GND   (press = "what's behind me?")
   The Pi connects with the Uno's USB cable only (power + serial). No other wires between them.
@@ -23,7 +24,8 @@
     X               everything off (bench testing)
     ?               status
   Board -> host: READY, BTN, FAILSAFE, LINK OK, ERR <line>,
-                 U <SL> <SR> <BL> <BR>   ultrasonic distances in cm, -1 = no echo (~8 times/s)
+                 U <SL> <SR> <BL> <BR>   ultrasonic distances in cm, -1 = no echo / not fitted
+                                         (one sensor fitted: ~33 times/s; all four: ~8 times/s)
 
   Failsafe: no command for 1.5 s -> light returns to a normal flashing bike light
   (fail-visible) and both motors give one long "system down" pattern.
@@ -32,22 +34,23 @@
 
 // ------------------------------------------------------------------ pins & settings
 const uint8_t PIN_MOTOR_L = 5;
-const uint8_t PIN_MOTOR_R = 6;
+const uint8_t PIN_MOTOR_R = 10;          // Timer1 PWM: unaffected by tone() for passive buzzers
 const uint8_t PIN_PIXELS  = 2;
 const uint8_t PIN_BUTTON  = 3;
 const uint8_t PIN_STATUS  = LED_BUILTIN;   // mirrors the rear light: test without the strip
 const uint8_t PIN_BUZZ_L  = 9;
-const uint8_t PIN_BUZZ_R  = 10;
+const uint8_t PIN_BUZZ_R  = 11;
 const bool    BUZZER_PASSIVE = false;       // true for bare passive buzzers (need a tone; Uno plays one at a time)
 const uint16_t BUZZ_HZ    = 2300;
 const uint8_t BUZZ_MIN_LEVEL = 3;           // buzzers join STRONG (3) and FAULT (4) patterns only
 
 // Ultrasonic sensors (HC-SR04), pinged one at a time so they don't hear each other's echoes
 const uint8_t NUM_SONAR = 4;
-const uint8_t SONAR_TRIG[NUM_SONAR] = {7, 11, A0, A2};   // SL, SR, BL, BR
-const uint8_t SONAR_ECHO[NUM_SONAR] = {8, 12, A1, A3};
+const uint8_t SONAR_TRIG[NUM_SONAR] = {6, 8, A0, A2};    // SL, SR, BL, BR
+const uint8_t SONAR_ECHO[NUM_SONAR] = {7, 12, A1, A3};
+const bool    SONAR_FITTED[NUM_SONAR] = {true, false, false, false};  // set true as you wire each one
 const unsigned long SONAR_TIMEOUT_US = 18000;   // ~3 m round trip; further = no echo
-const unsigned long SONAR_GAP_MS     = 30;      // one ping every 30 ms -> each sensor ~8 Hz
+const unsigned long SONAR_GAP_MS     = 30;      // one ping every 30 ms, shared by the fitted sensors
 const uint8_t NUM_PIXELS  = 8;
 const bool    MOTOR_ACTIVE_HIGH = true;    // set false if your module turns ON with a LOW input
 const unsigned long LINK_TIMEOUT_MS = 1500;
@@ -241,6 +244,9 @@ void pollButton(unsigned long now) {
 void pollSonar(unsigned long now) {
   if (now - lastPingMs < SONAR_GAP_MS) return;
   lastPingMs = now;
+  uint8_t tries = 0;                              // skip sensors that aren't fitted
+  while (!SONAR_FITTED[sonarIdx] && tries++ < NUM_SONAR) sonarIdx = (sonarIdx + 1) % NUM_SONAR;
+  if (!SONAR_FITTED[sonarIdx]) return;            // none fitted
   uint8_t i = sonarIdx;
   digitalWrite(SONAR_TRIG[i], LOW);
   delayMicroseconds(2);
@@ -249,8 +255,11 @@ void pollSonar(unsigned long now) {
   digitalWrite(SONAR_TRIG[i], LOW);
   unsigned long us = pulseIn(SONAR_ECHO[i], HIGH, SONAR_TIMEOUT_US);
   sonarCm[i] = us ? (int)(us / 58) : -1;        // 58 us per cm (sound there and back)
+  // report after the last fitted sensor in the round (unfitted ones always read -1)
+  uint8_t last = 0;
+  for (uint8_t k = 0; k < NUM_SONAR; k++) if (SONAR_FITTED[k]) last = k;
   sonarIdx = (sonarIdx + 1) % NUM_SONAR;
-  if (sonarIdx == 0) {                            // full round: report all four
+  if (i == last) {
     Serial.print(F("U"));
     for (uint8_t k = 0; k < NUM_SONAR; k++) { Serial.print(' '); Serial.print(sonarCm[k]); }
     Serial.println();
