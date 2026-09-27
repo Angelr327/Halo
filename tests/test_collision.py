@@ -190,9 +190,11 @@ class OutputTests(unittest.TestCase):
 
     def test_snapshot_preserves_rear_fields_and_front_direction(self):
         _, rows = PolicyTests().run_path(lambda t: pose(4-t), 21)
-        s = snapshot.build([], 1, hud_state={'LEFT': 2}, collision=rows[-1])
+        incidents = {'latest': 'rear-incident', 'recording': True}
+        s = snapshot.build([], 1, hud_state={'LEFT': 2}, collision=rows[-1], incidents=incidents)
         self.assertEqual(s['hud'], {'LEFT': 2})
         self.assertEqual(s['cars'], [])
+        self.assertEqual(s['incidents'], incidents)
         self.assertLess(s['front_obstacles'][0]['z'], 0)
         self.assertEqual(s['front_obstacles'][0]['detected_label'], 'chair')
         self.assertEqual(s['front_obstacles'][0]['display_asset'], 'tree')
@@ -326,6 +328,30 @@ class RuntimeTests(unittest.TestCase):
 
             # Exercise the actual main wiring, JSONL metadata, and shutdown.
             from helmet import main as M
+            from helmet.incidents import IncidentRecorder
+            class ReplayRecorder(IncidentRecorder):
+                def __init__(self, **kwargs):
+                    super().__init__(client=None, directory=str(Path(folder) / 'incidents'))
+                    self.polled_times = []
+                    self.marked = False
+                    self.closing = False
+
+                def add_frame(self, frame, t, tracks=(), contacts=()):
+                    if not self.marked:
+                        self.trigger_manual(t, tracks)
+                        self.marked = True
+                    super().add_frame(frame, t, tracks, contacts)
+
+                def poll(self, t):
+                    if not self.closing:
+                        self.polled_times.append(t)
+                    super().poll(t)
+
+                def close(self, timeout=15):
+                    self.closing = True
+                    super().close(timeout)
+
+            recorder = ReplayRecorder()
             calpath, logpath = Path(folder) / 'cal.json', Path(folder) / 'decisions.jsonl'
             calibration().save(calpath)
             argv = ['main', '--collision', '--collision-calibration', str(calpath),
@@ -333,10 +359,17 @@ class RuntimeTests(unittest.TestCase):
                     '--headless', '--stream', '0', '--no-gemini', '--no-hud', '--no-realtime',
                     '--port', '/dev/no-arduino-collision-test']
             with patch.object(sys, 'argv', argv), patch.object(M, 'VehicleDetector', FakeDetector), \
+                    patch.object(M, 'IncidentRecorder', return_value=recorder), \
                     patch.object(cfg, 'TTS_ENABLED', False), patch.object(cfg, 'HEADLESS', True), \
                     patch.object(cfg, 'STREAM_PORT', None), patch.object(cfg, 'GEMINI_ENABLED', False), \
                     redirect_stdout(io.StringIO()):
                 M.main()
+            self.assertTrue(recorder.polled_times)
+            self.assertLessEqual(max(recorder.polled_times), 1.9 + 1e-6,
+                                 'front-only replay events must poll incidents in media time')
+            reports = recorder.list()
+            self.assertEqual(len(reports), 1)
+            self.assertGreater(reports[0]['duration_s'], 1.5, 'incident must retain post-roll during paired replay')
             logs = [json.loads(line) for line in logpath.read_text().splitlines()]
             self.assertEqual(logs[0]['type'], 'session')
             self.assertEqual(logs[0]['calibration']['marker_length_m'], .2)

@@ -27,6 +27,7 @@ from . import config as cfg
 from .gemini_gateway import GeminiEvent, GeminiGateway, facts_for, prepare_frame, record_wav
 from .fusion import SonarFusion
 from .hud import Hud
+from .incidents import IncidentRecorder
 from . import snapshot
 from .outputs import HelmetLink, Speaker
 from .overlay import Overlay
@@ -191,9 +192,12 @@ def main():
             raise
         print("Front collision demo: stationary marked chair, straight approach, look ahead")
     fusion = SonarFusion()
+    recorder = IncidentRecorder(client=gateway.client)
     st = State()
     headless = cfg.HEADLESS
     streamer = Streamer(cfg.STREAM_PORT) if cfg.STREAM_PORT else None
+    if streamer:
+        streamer.incidents = recorder
     print(f"Detector: {detector.model_name} @ {cfg.IMGSZ} | Camera: {type(source).__name__} | "
           f"Serial: {link.status} | Gemini: {gateway.status if not gateway.available else cfg.GEMINI_MODEL}")
     print(f"HUD: {hud.status}")
@@ -289,7 +293,8 @@ def main():
             "fps": st.fps, "det_ms": detector.last_ms, "age_ms": st.age_ms, "link": link,
             "policy": policy, "gateway": gateway, "speaker": speaker, "light": st.light,
             "fault": st.fault, "shaky": motion.shaky(st.t), "recording": st.writer is not None,
-            "paused": getattr(source, "paused", False), "scene_note": st.scene_note, "hud": hud.preview})
+            "paused": getattr(source, "paused", False), "scene_note": st.scene_note, "hud": hud.preview,
+            "incident": recorder.recording})
         if forward is not None:
             front_preview = forward.preview()
             if front_preview is not None:
@@ -313,7 +318,8 @@ def main():
             tracker.tracks, st.t, hud_state=hud.state, fault=st.fault, shaky=shaky, light=st.light,
             fps=st.fps, det_ms=detector.last_ms, link=link, profile=policy.profile_name,
             captions=speaker.captions, scene=getattr(source, "title", None), contacts=fusion.contacts,
-            collision=hud.collision))
+            collision=hud.collision,
+            incidents={"latest": recorder.latest_id, "recording": recorder.recording}))
 
     def poll_key():
         k = cv2.waitKey(1) & 0xFF if not headless else 255
@@ -369,6 +375,9 @@ def main():
             print("config reloaded")
         elif key == ord("d"):
             overlay.show_panel = not overlay.show_panel
+        elif key == ord("i"):
+            if recorder.trigger_manual(st.t, tracker.tracks):
+                speaker.say("Incident marked.", priority=2, max_age=3, source="system")
         elif key == ord("r"):
             if st.writer is None and st.last_frame is not None:
                 h, w = st.last_frame.shape[:2]
@@ -410,9 +419,14 @@ def main():
                     set_fault(True)
                 if st.fault:
                     st.light = 0                      # fail-visible: normal flashing bike light
-                fusion.update([], now, link, now=now)            # side sensors still work with no camera
-                for f in policy.evaluate_contacts(fusion.contacts, [], now, False):
+                # A front-only replay event (or pause) must not advance the
+                # incident recorder from media seconds to host monotonic seconds.
+                event_t = now if source.is_live else getattr(source, "last_t", st.t)
+                fusion.update([], event_t, link, now=now)         # side sensors still work with no camera
+                for f in policy.evaluate_contacts(fusion.contacts, [], event_t, False):
                     execute_fire(f)
+                    recorder.trigger(f, event_t)
+                recorder.poll(event_t)
                 # A front replay event is not a lost rear frame. Keep the last rear
                 # state while it is fresh; fault handling still clears failed cameras.
                 hud.update(tracker.tracks if args.collision and not st.fault else [],
@@ -456,8 +470,10 @@ def main():
             fires += policy.evaluate_contacts(fusion.contacts, tracker.tracks, t, shaky)
             for f in sorted(fires, key=lambda f: -f.tier):
                 execute_fire(f)
+                recorder.trigger(f, t, tracker.tracks)            # dashcam: HIGH alerts become incidents
             st.light = policy.light_level(tracker.tracks, t)
             hud.update(tracker.tracks, extra=fusion.hud_state())
+            recorder.add_frame(frame, t, tracker.tracks, fusion.contacts)
             publish_snapshot(now, shaky)
 
             st.frames.append(frame)
@@ -499,6 +515,7 @@ def main():
             log_file.close()
         link.close()
         hud.close()
+        recorder.close()
         source.release()
         if not headless:
             cv2.destroyAllWindows()

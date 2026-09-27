@@ -21,7 +21,7 @@ def _r(v, nd=2):
 
 
 def build(tracks, t, *, hud_state, fault=False, shaky=False, light=0, fps=0.0, det_ms=0.0,
-          link=None, profile="", captions=(), scene=None, contacts=(), collision=None):
+          link=None, profile="", captions=(), scene=None, contacts=(), collision=None, incidents=None):
     cars = []
     for tr in tracks:
         if tr.lat_m is None or tr.dist_m is None:
@@ -95,4 +95,5 @@ def build(tracks, t, *, hud_state, fault=False, shaky=False, light=0, fps=0.0, d
         "corridor_half_m": cfg.RIDER_HALF_WIDTH_M + cfg.CORRIDOR_MARGIN_M,
         "demo_person": bool(cfg.DEMO_PERSON_AS_VEHICLE),   # people stand in for vehicles (stationary demo)
         "sonar_mount": {k: {"zone": z, "yaw": y, "offset": cfg.SONAR_OFFSET_M} for k, (z, y) in cfg.SONAR_MOUNT.items()},
+        "incidents": incidents or {"latest": None, "recording": False},   # app refreshes its list when latest changes
     }

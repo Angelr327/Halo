@@ -174,9 +174,9 @@ the back of the helmet) and the **front camera the normal way up**. In `helmet/c
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `CAMERA_INDEX` | `0` | which camera is the rear one (Pi camera number = CSI port) |
+| `CAMERA_INDEX` | `1` | which camera is the rear one (verify with `python -m tools.bench check`) |
 | `CAMERA_ROTATE_180` | `True` | rear camera upside down; rotated in the camera itself (no CPU cost) |
-| `FRONT_CAMERA_INDEX` | `1` | the front camera |
+| `FRONT_CAMERA_INDEX` | `0` | the helmet-front camera |
 | `FRONT_CAMERA_ROTATE_180` | `False` | front camera upright |
 | `MIRROR_VIEW` | `True` | applied after the rotation, so rider-left shows on the left |
 
@@ -236,6 +236,65 @@ sensors draw arcs beside the bike. The camera button adds the live debug feed.
   brushing past, and standing still (which must stay quiet).
 - **Laptop:** add `--stream 8080` to any run (`--video clip.mp4 --stream 8080`).
 - Distance comes from one camera (±20-30%); side and time-to-contact are the reliable parts.
+
+## Incident reports (clip + Gemini analysis)
+
+The Pi keeps the last few seconds of rear video in memory (JPEGs, ~6 MB). When a HIGH alert
+fires it saves a clip from 6 s before to 4 s after, with the measured facts attached, and asks
+Gemini for a short report. The API key stays on the Pi; the phone only downloads results.
+
+- **Saved per incident** in `incidents/<id>/`: `clip.mp4` (H.264, plays on iPhone),
+  `thumb.jpg` (the frame the alert fired on) and `meta.json` (side, vehicle, measured gap from
+  the side sensor, time-to-contact when the warning fired, distance trace, alert events, a local
+  summary, and Gemini's report).
+- **Merging:** more alerts from the same vehicle extend the clip (max 20 s); a different
+  vehicle alerting meanwhile gets its own incident afterwards; the same vehicle can't open a
+  new one for 15 s.
+- **Rider mark:** press `i` (or "Mark incident" on the web page, or `POST /api/v1/incidents`
+  from the app) to save the last 6 s + next 4 s by hand.
+- **Gemini** gets 6 frames from the clip plus the measured facts, and returns JSON:
+  `classification` (close_pass, near_miss, aggressive_overtake, tailgating, normal_pass,
+  false_alarm, unclear), `severity` 1-5, `vehicle`, `maneuver`, `summary`, `confidence`. It's
+  told to treat the sensor numbers as authoritative and never to call a pass "safe". Without a
+  key, reports still get the local summary (`analysis_status: "not_configured"`).
+- **Encoding:** uses `ffmpeg` (installed by `setup_pi.sh`; or `pip install imageio-ffmpeg`),
+  at low priority on a background thread, so detection isn't slowed. Without it, OpenCV writes
+  an MPEG-4 file that browsers may not play.
+- **Try it with no hardware:** `python -m helmet.main --sim`, wait for the red scenes, then open
+  `http://<pi-ip>:8080/api/v1/incidents`.
+
+API for the iOS app (all paths relative to `http://<pi-ip>:8080`; add `?t=<word>` if
+`STREAM_TOKEN` is set):
+
+| Request | Returns |
+|---|---|
+| `GET /api/v1/state` | live snapshot; `incidents.latest` changes when a new report is saved, `incidents.recording` is true while one is being captured |
+| `GET /api/v1/incidents` | `{"incidents": [report, ...], "enabled": true, "recording": false}`, newest first |
+| `GET /api/v1/incidents/<id>` | one report (below) |
+| `GET /api/v1/incidents/<id>/clip.mp4` | the clip; supports `Range` (AVPlayer needs it) |
+| `GET /api/v1/incidents/<id>/thumb.jpg` | thumbnail |
+| `POST /api/v1/incidents` | 202; the rider marks an incident now |
+| `POST /api/v1/incidents/<id>/analyze` | 202 re-runs Gemini; 409 if no key or budget left |
+
+```json
+{"id": "20260927-143102-l", "time": "2026-09-27T14:31:02", "kind": "auto", "severity": "HIGH",
+ "zone": "LEFT", "side": "left", "label": "car", "reason": "close pass 0.25 m measured",
+ "measured_clearance_m": 0.25, "ttc_at_alert_s": 1.4, "min_ttc_s": 0.6, "duration_s": 10.0,
+ "local_summary": "Car passed close on your left (measured gap 0.25 m, warned 1.4 s before contact).",
+ "analysis_status": "done",
+ "analysis": {"classification": "close_pass", "severity": 4, "vehicle": "white SUV",
+              "maneuver": "overtook without moving over", "summary": "...", "confidence": "medium"},
+ "url": "/api/v1/incidents/20260927-143102-l",
+ "clip_url": "/api/v1/incidents/20260927-143102-l/clip.mp4",
+ "thumb_url": "/api/v1/incidents/20260927-143102-l/thumb.jpg"}
+```
+
+`analysis_status` is `pending`, `done`, `failed` (see `analysis_error`), `budget_exhausted`,
+`not_configured` or `not_requested`. Show `analysis.summary` when it's `done`, otherwise
+`local_summary`. `kind` is `auto`, or `manual` for a rider mark (`severity: "MARKED"`).
+The Pi has no GPS, so the phone should attach its own location when it first sees a new id.
+
+Settings are in `config.py` under `INCIDENT_*`.
 
 ## Transparent OLED HUD (Pi)
 

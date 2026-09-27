@@ -5,7 +5,7 @@
 set -euo pipefail
 
 sudo apt update
-sudo apt install -y python3-venv python3-picamera2 espeak-ng libportaudio2
+sudo apt install -y python3-venv python3-picamera2 espeak-ng libportaudio2 ffmpeg   # ffmpeg: incident clips
 sudo usermod -aG dialout,video,spi,i2c,gpio "$USER"   # Arduino serial, camera, OLED HUD
 sudo raspi-config nonint do_spi 0               # transparent OLED HUD (SPI); takes effect after reboot
 sudo raspi-config nonint do_i2c 0
@@ -28,6 +28,7 @@ python -m tests.test_synthetic
 python -m tests.test_gateway
 python -m tests.test_headless
 python -m tests.test_collision
+python -m tests.test_incidents
 
 echo
 echo "Done. Reboot once (SPI/I2C + group changes), then:"

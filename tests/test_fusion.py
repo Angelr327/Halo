@@ -6,7 +6,10 @@ import math
 from contextlib import redirect_stdout
 from types import SimpleNamespace
 
+import tempfile
+
 from helmet import config as cfg
+cfg.INCIDENT_DIR = tempfile.mkdtemp(prefix="incidents-test-")   # keep test clips out of the repo
 from helmet import snapshot
 from helmet.fusion import SonarFusion
 from helmet.outputs import SONAR_NAMES

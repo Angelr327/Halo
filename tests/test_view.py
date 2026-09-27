@@ -12,7 +12,10 @@ from collections import deque
 from contextlib import redirect_stdout
 from types import SimpleNamespace
 
+import tempfile
+
 from helmet import config as cfg
+cfg.INCIDENT_DIR = tempfile.mkdtemp(prefix="incidents-test-")   # keep test clips out of the repo
 from helmet import main as M
 from helmet import snapshot
 from helmet.perception import Tracker, update_metrics
@@ -128,13 +131,29 @@ def test_endpoints():
                 raise AssertionError(f"{bad} should be 404")
             except urllib.error.HTTPError as e:
                 assert e.code == 404
-        st.publish_state({"cars": [{"id": 9}], "hud": {}})
+        try:
+            get("/api/v1/state")
+            raise AssertionError("no snapshot yet: should be 503")
+        except urllib.error.HTTPError as e:
+            assert e.code == 503
+        state = snapshot.build([_track(id=9)], 1.0, hud_state={"LEFT": 2},
+                               collision={"state": "BRAKE", "reason": "BRAKING BOUNDARY", "valid": True,
+                                          "target_id": "front:marker:0", "x": 0.0, "z": 3.0,
+                                          "on_path": True, "ttc_s": 2.0},
+                               incidents={"latest": "rear-incident", "recording": True})
+        st.publish_state(state)
+        polled = json.loads(get("/api/v1/state").read())            # what the iOS app polls
+        assert polled["cars"][0]["id"] == 9
+        assert polled["collision"]["state"] == "BRAKE"
+        assert polled["front_obstacles"][0]["display_asset"] == "tree"
+        assert polled["incidents"] == {"latest": "rear-incident", "recording": True}
         r = get("/state")
         lines = []
         while len([ln for ln in lines if ln.startswith(b"data:")]) < 1:
             lines.append(r.readline().strip())
         data = json.loads([ln for ln in lines if ln.startswith(b"data:")][0][5:])
         assert data["cars"][0]["id"] == 9
+        assert data == polled, "browser and iOS must receive the same combined snapshot"
         r.close()
         print("  /view, /static (no path traversal), /state SSE: ok")
     finally:

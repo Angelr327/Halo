@@ -58,7 +58,7 @@ The pose implementation follows [OpenCV marker detection](https://docs.opencv.or
 
 ```bash
 python -m helmet.main --collision --collision-calibration front_calibration.json \
-  --camera 0 --front-camera 1 --headless --stream 8080 --no-gemini \
+  --camera 1 --front-camera 0 --headless --stream 8080 --no-gemini \
   --collision-log collision_run.jsonl
 ```
 
@@ -86,7 +86,7 @@ States:
 
 Chair detection may drop out for up to 1 s while the same configured marker remains visible. Losing the marker invalidates range immediately. An active BRAKE warning is held briefly on loss, then becomes unavailable; old speed is never treated as zero. Reacquisition starts a fresh history. If the producer stalls entirely, the OLED watchdog expires its state after 0.8 s.
 
-Snapshot additions are additive: `front_obstacles` (camera-qualified IDs, negative z = ahead), and `collision` (state, reason, metric position, clearance, estimated approach speed/error, TTC, boundary, alignment, measurement age, and update rates). Existing rear `cars`/`hud` fields keep their meaning. JSON logs start with a calibration/settings session record followed by decision records.
+Snapshot additions are additive: `front_obstacles` (camera-qualified IDs, negative z = ahead), and `collision` (state, reason, metric position, clearance, estimated approach speed/error, TTC, boundary, alignment, measurement age, and update rates). Existing rear `cars`/`hud` fields keep their meaning. The shared feed also retains rear `incidents` metadata for the iOS `/api/v1/state` endpoint; front BRAKE decisions are recorded separately in the collision JSONL log. JSON logs start with a calibration/settings session record followed by decision records.
 
 ## Record and replay both cameras
 
@@ -128,4 +128,5 @@ python -m tests.test_headless
 python -m tests.test_view
 python -m tests.test_fusion
 python -m tests.test_gateway
+python -m tests.test_incidents
 ```
