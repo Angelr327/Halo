@@ -25,6 +25,9 @@ CAMERA_INDEX = 1                  # [restart] which camera is the REAR one: Pi c
 CAMERA_ROTATE_180 = True          # [restart] rear camera mounted upside down (cable routed down the back of the helmet)
 FRONT_CAMERA_INDEX = 0            # [restart] front camera (riding conditions): the other one
 FRONT_CAMERA_ROTATE_180 = False   # [restart] front camera is mounted the normal way up
+CAMERA_PORT = ""                  # [restart] Pi only: pick the rear camera by connector, e.g. "i2c@80000" (from
+                                  # rpicam-hello --list-cameras). Beats CAMERA_INDEX: numbers reorder, connectors don't
+FRONT_CAMERA_PORT = ""            # [restart] same for the front camera
 CAPTURE_WIDTH = 640               # [restart]
 CAPTURE_HEIGHT = 480              # [restart]
 CAPTURE_FPS = 30                  # [restart]
