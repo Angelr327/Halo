@@ -21,13 +21,13 @@ IS_PI = _is_raspberry_pi()        # Pi-friendly defaults below switch on automat
 
 # ---------------------------------------------------------------- input
 CAMERA_SOURCE = "auto"            # [restart] "auto" (Pi camera if present, else USB) | "usb" | "picamera2"
-CAMERA_INDEX = 1                  # [restart] which camera is the REAR one: Pi camera number or USB index (check with: python -m tools.bench check)
+CAMERA_INDEX = 0                  # [restart] which camera is the REAR one: Pi camera number or USB index (check with: python -m tools.bench check)
 CAMERA_ROTATE_180 = True          # [restart] rear camera mounted upside down (cable routed down the back of the helmet)
-FRONT_CAMERA_INDEX = 0            # [restart] front camera (riding conditions): the other one
+FRONT_CAMERA_INDEX = 1            # [restart] front camera (riding conditions): the other one
 FRONT_CAMERA_ROTATE_180 = False   # [restart] front camera is mounted the normal way up
-CAMERA_PORT = ""                  # [restart] Pi only: pick the rear camera by connector, e.g. "i2c@80000" (from
+CAMERA_PORT = "i2c@88000"         # [restart] Pi only: pick the rear camera by connector, e.g. "i2c@80000" (from
                                   # rpicam-hello --list-cameras). Beats CAMERA_INDEX: numbers reorder, connectors don't
-FRONT_CAMERA_PORT = ""            # [restart] same for the front camera
+FRONT_CAMERA_PORT = "i2c@80000"   # [restart] same for the front camera
 CAPTURE_WIDTH = 640               # [restart]
 CAPTURE_HEIGHT = 480              # [restart]
 CAPTURE_FPS = 30                  # [restart]
