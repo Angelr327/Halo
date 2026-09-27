@@ -333,7 +333,9 @@ function setLabel(sprite, text, tier) {
   if (g.roundRect) g.roundRect(28, 8, 200, 64, 32); else g.rect(28, 8, 200, 64);
   g.fill();
   g.fillStyle = tier >= 1 ? '#0b0e13' : '#e8ecf1';
-  g.font = '700 40px system-ui, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  let px = 40;                                  // shrink long labels ("0.52 m gap") to fit the pill
+  do { g.font = `700 ${px}px system-ui, sans-serif`; px -= 2; } while (g.measureText(text).width > 180 && px > 20);
+  g.textAlign = 'center'; g.textBaseline = 'middle';
   g.fillText(text, 128, 42);
   tex.needsUpdate = true;
 }
@@ -425,12 +427,31 @@ function makePerson() {
   return { kind: 'person', group, bodyMat, mats, glowMat, label, ribbon: makeRibbon(), limbs, phase: 0, speed: 0,
     pos: null, yaw: 0, fade: 0, gone: false, data: null };
 }
-const kindOf = (d) => (d.label === 'person' ? 'person' : 'car');
-const makeActor = (d) => (kindOf(d) === 'person' ? makePerson() : makeCar());
+// Side-sensor echo the camera never saw: we know where, not what. A plain translucent column.
+const UNKNOWN_GEO = new THREE.CylinderGeometry(0.3, 0.3, 1.5, 20).translate(0, 0.75, 0);
+function makeUnknown() {
+  const group = new THREE.Group();
+  const bodyMat = new THREE.MeshStandardMaterial({ color: TIER_HEX[0], roughness: 0.4, transparent: true });
+  const mats = [bodyMat];
+  group.add(new THREE.Mesh(UNKNOWN_GEO, bodyMat));
+  const glowMat = new THREE.MeshBasicMaterial({ map: GLOW_TEX, color: 0xff8a1f, transparent: true, opacity: 0,
+    depthWrite: false, blending: THREE.AdditiveBlending });
+  const glow = new THREE.Mesh(new THREE.PlaneGeometry(1.8, 1.8), glowMat);
+  glow.rotation.x = -Math.PI / 2; glow.position.y = 0.02;
+  group.add(glow);
+  const label = makeLabel();
+  label.position.set(0, 2.0, 0);
+  group.add(label);
+  scene.add(group);
+  return { kind: 'unknown', group, bodyMat, mats, glowMat, label, ribbon: makeRibbon(), pos: null, yaw: 0, fade: 0,
+    gone: false, data: null };
+}
+const kindOf = (d) => (d.label === 'person' ? 'person' : d.label === 'unknown' ? 'unknown' : 'car');
+const makeActor = (d) => ({ person: makePerson, unknown: makeUnknown, car: makeCar }[kindOf(d)])();
 // How far behind the rider an actor's centre must stay when it is in line with the bike,
 // so the model never sits on top of the rider: [half width, min distance] in metres.
-const FOOTPRINT = { car: [0.9, 2.7], person: [0.25, 1.1] };
-const NOSE = { car: 2.3, person: 0.3 };             // centre -> front, where the path strip starts
+const FOOTPRINT = { car: [0.9, 2.7], person: [0.25, 1.1], unknown: [0.3, 0.6] };
+const NOSE = { car: 2.3, person: 0.3, unknown: 0.3 };             // centre -> front, where the path strip starts
 
 function disposeCar(c) {
   scene.remove(c.group); scene.remove(c.ribbon);
@@ -440,13 +461,23 @@ function disposeCar(c) {
 }
 
 // ------------------------------------------------------------------ ultrasonic arcs
-const SONAR_DIR = { SL: 315, SR: 225, BL: 285, BR: 255 };     // degrees, ring-local (after laying it flat)
+// Arc direction comes from how each sensor is mounted (snapshot "sonar_mount": side + degrees
+// angled backward). Ring geometry is laid flat, so ring-local angle = atan2(-dz, dx) in world terms.
 const sonarArcs = {};
+let sonarMount = {};
+function sonarAngle(k) {
+  const m = sonarMount[k];
+  if (!m) return null;
+  const yaw = (m.yaw || 0) * Math.PI / 180;
+  const dx = W((m.zone === 'LEFT' ? -1 : 1) * Math.cos(yaw)), dz = Math.sin(yaw);
+  return Math.atan2(-dz, dx) * 180 / Math.PI;
+}
 function updateSonar(sonar) {
-  for (const k of Object.keys(SONAR_DIR)) {
+  for (const k of Object.keys(sonar || {})) {
     const r = sonar ? sonar[k] : null;
     let arc = sonarArcs[k];
-    if (r == null || r > 3) { if (arc) arc.mesh.visible = false; continue; }
+    const dir = sonarAngle(k);
+    if (r == null || r > 3 || dir == null) { if (arc) arc.mesh.visible = false; continue; }
     if (!arc) {
       const mesh = new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshBasicMaterial({ transparent: true,
         opacity: 0.85, depthWrite: false, side: THREE.DoubleSide }));
@@ -455,9 +486,11 @@ function updateSonar(sonar) {
       arc = sonarArcs[k] = { mesh, r: -1 };
     }
     arc.mesh.visible = true;
+    const m = sonarMount[k];                       // arc starts at the sensor on the side of the helmet
+    arc.mesh.position.x = W((m.zone === 'LEFT' ? -1 : 1) * (m.offset || 0));
     if (Math.abs(arc.r - r) > 0.03) {
       arc.r = r;
-      const a = (SONAR_DIR[k] - 20) * Math.PI / 180;
+      const a = (dir - 20) * Math.PI / 180;
       arc.mesh.geometry.dispose();
       arc.mesh.geometry = new THREE.RingGeometry(Math.max(0.2, r - 0.07), r + 0.07, 24, 1, a, 40 * Math.PI / 180);
       arc.mesh.material.color.setHex(r < 1 ? 0xff3b30 : r < 2 ? 0xff8a1f : 0x3ddc97);
@@ -473,15 +506,17 @@ let bannerKey = '';
 function describe(car) {
   const r = car.reason || '';
   const side = car.zone === 'LEFT' ? 'left' : car.zone === 'RIGHT' ? 'right' : 'behind';
-  const who = kindOf(car) === 'person' ? 'Person' : 'Car';
+  const who = { person: 'Person', unknown: 'Something', car: 'Car' }[kindOf(car)];
   let title;
   if (r.includes('cutting in')) title = `${who} cutting in from the ${side}`;
   else if (r.includes('close pass')) title = `Close pass on your ${side}`;
   else if (r.includes('closing behind')) title = `${who} closing behind`;
   else if (r.includes('behind')) title = `${who} closing fast behind`;
-  else if (r.includes('alongside')) title = `${who} in your ${side} blind spot`;
+  else if (r.includes('alongside') || r.includes('beside')) title = `${who} beside you on the ${side}`;
   else title = `${who} approaching your ${side} blind spot`;
   const bits = [];
+  if (car.measured != null) bits.push(`measured gap ${car.measured.toFixed(2)} m`);
+  if (car.sonar_only) bits.push('side sensor only');
   if (car.ttc != null && !car.alongside) bits.push(`${car.ttc.toFixed(1)} s to reach you`);
   if (!car.alongside && car.z != null) bits.push(`${car.z.toFixed(0)} m back`);
   if (car.alongside) bits.push('beside you now');
@@ -514,6 +549,8 @@ let last = null, lastMsg = 0, fps = 0;
 function onState(data) {
   last = data; lastMsg = performance.now();
   setCorridor(data.corridor_half_m);
+  sonarMount = data.sonar_mount || {};
+  for (const [k, arc] of Object.entries(sonarArcs)) if (!(data.sonar && k in data.sonar)) arc.mesh.visible = false;
   const seen = new Set();
   for (const d of data.cars) {
     seen.add(d.id);
@@ -610,7 +647,8 @@ function frame() {
     for (const m of c.mats) m.opacity = c.fade;
     c.glowMat.color.setHex(TIER_HEX[Math.max(tier, 1)]);
     c.glowMat.opacity = c.fade * (tier >= 3 ? (blinkOn ? 0.95 : 0.35) : tier === 2 ? 0.6 : 0);
-    const text = tier >= 1 && d.ttc != null && !d.alongside ? `${d.ttc.toFixed(1)} s`
+    const text = d.measured != null ? `${d.measured.toFixed(2)} m gap`     // side sensor: a real measurement
+      : tier >= 1 && d.ttc != null && !d.alongside ? `${d.ttc.toFixed(1)} s`
       : d.alongside ? 'beside' : `${Math.round(d.z)} m`;
     setLabel(c.label, text, tier);
     c.label.material.opacity = c.fade;

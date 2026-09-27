@@ -146,6 +146,19 @@ HEARTBEAT_S = 0.25
 BUZZERS_ENABLED = True            # buzzers beep with STRONG/FAULT buzzes; False for a quiet demo room
 SONAR_MAX_CM = 300                # ultrasonic readings beyond this are treated as "nothing there"
 
+# ---------------------------------------------------------------- ultrasonic fusion (side sensors)
+# Which sensors are fitted: name -> (side, degrees angled backward from pointing straight out).
+# Names match the firmware (SL = left, SR = right). Add "SR": ("RIGHT", 5.0) when it's wired.
+SONAR_MOUNT = {"SL": ("LEFT", 5.0)}
+SONAR_OFFSET_M = 0.12             # sensor's distance from the helmet centreline
+SONAR_MIN_M = 0.05
+SONAR_STATIC_S = 3.0              # an echo that hasn't moved this long is background (wall, backpack)
+SONAR_STATIC_TOL_M = 0.15
+SONAR_CONTACT_M = 1.5             # an echo the camera never saw raises MED only inside this range
+SONAR_CONFIRM_READINGS = 3        # ...and only after this many filtered readings
+SONAR_HANDOFF_S = 1.5             # link an echo to a camera track lost from view this recently
+SONAR_LOST_S = 0.4                # no echo this long = the contact has passed
+
 # ---------------------------------------------------------------- transparent OLED HUD
 HUD_ENABLED = True                # [restart] big directional arrows for MED/HIGH threats
 HUD_DRIVER = "ssd1309"            # [restart] 1.51" transparent OLED (Waveshare); "ssd1306" for common 0.96" modules

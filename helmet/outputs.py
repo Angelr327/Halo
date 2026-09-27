@@ -42,6 +42,7 @@ class HelmetLink:
         self.motor_flash = {"L": -1e9, "R": -1e9}      # for the on-screen motor indicators
         self.sonar = dict.fromkeys(SONAR_NAMES)          # metres, None = no echo / no data
         self.sonar_t = -1e9
+        self.sonar_hist = deque(maxlen=64)               # (monotonic time, readings) for fusion
         self._rx_buf = b""
         self._connect()
 
@@ -144,8 +145,14 @@ class HelmetLink:
         except ValueError:
             return
         if len(cms) == len(SONAR_NAMES):
-            self.sonar = {n: (cm / 100.0 if 2 <= cm <= cfg.SONAR_MAX_CM else None) for n, cm in zip(SONAR_NAMES, cms)}
-            self.sonar_t = time.monotonic()
+            self.inject_sonar({n: (cm / 100.0 if 2 <= cm <= cfg.SONAR_MAX_CM else None)
+                               for n, cm in zip(SONAR_NAMES, cms)})
+
+    def inject_sonar(self, readings, ts=None):
+        """Record one set of ultrasonic readings (metres or None). The simulator calls this too."""
+        self.sonar = dict(readings)
+        self.sonar_t = time.monotonic() if ts is None else ts
+        self.sonar_hist.append((self.sonar_t, self.sonar))
 
     def sonar_fresh(self):
         return time.monotonic() - self.sonar_t < 0.5
