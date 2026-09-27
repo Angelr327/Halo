@@ -1,3 +1,5 @@
+Created by: Sion King
+
 # Blind-spot helmet
 
 Rear-facing camera → local YOLO detection → directional haptics, a rear light that warns the
