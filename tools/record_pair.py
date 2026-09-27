@@ -19,7 +19,7 @@ from helmet.sources import open_camera
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--output", required=True, help="new recording directory")
-    ap.add_argument("--calibration", required=True, help="front alignment JSON to copy into this session")
+    ap.add_argument("--calibration", help="marker mode only: front alignment JSON to copy into this session")
     ap.add_argument("--seconds", type=float, default=20)
     ap.add_argument("--rear-camera", type=int, default=cfg.CAMERA_INDEX)
     ap.add_argument("--front-camera", type=int, default=cfg.FRONT_CAMERA_INDEX)
@@ -27,12 +27,13 @@ def main():
     args = ap.parse_args()
     if args.seconds <= 0 or args.rear_camera == args.front_camera:
         ap.error("positive duration and different camera indices required")
-    cal = Calibration.load(args.calibration)
-    if cal.image_size != (cfg.CAPTURE_WIDTH, cfg.CAPTURE_HEIGHT):
+    cal = Calibration.load(args.calibration) if args.calibration else None
+    if cal is not None and cal.image_size != (cfg.CAPTURE_WIDTH, cfg.CAPTURE_HEIGHT):
         ap.error("calibration resolution must match capture resolution")
     out = Path(args.output)
     out.mkdir(parents=True, exist_ok=False)
-    cal.save(out / "calibration.json")
+    if cal is not None:
+        cal.save(out / "calibration.json")
     cfg.CAMERA_SOURCE = args.source
     sources, workers, errors = [], [], []
     stamps = {"version": 1, "timestamp_basis": "host receipt monotonic seconds from shared start", "rear": [], "front": []}
@@ -83,7 +84,8 @@ def main():
             f.write("\n")
     if errors or not all(stamps[s] for s in ("rear", "front")):
         ap.exit(1, "Recording incomplete: " + "; ".join(errors or ["no frames"]) + "\n")
-    print("Saved raw clips, timestamps.json, and calibration.json. Replay using --replay-timestamps.")
+    print("Saved raw clips, timestamps.json" + (", and calibration.json" if cal is not None else "")
+          + ". Replay using --replay-timestamps.")
 
 
 if __name__ == "__main__":

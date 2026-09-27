@@ -57,7 +57,7 @@ struct RideView: View {
         VStack(alignment: .leading, spacing: AppSpacing.large) {
             AppSectionHeader(title: "Ready to ride?", detail: viewModel.location.status.rawValue)
             HStack(spacing: AppSpacing.medium) {
-                statusPill(viewModel.helmetState.isConnected ? "Helmet connected" : "Helmet offline", icon: viewModel.helmetState.isConnected ? "checkmark.circle.fill" : "xmark.circle.fill", color: viewModel.helmetState.isConnected ? AppTheme.safe : AppTheme.danger)
+                statusPill(viewModel.helmetState.isConnected ? "Helmet online" : viewModel.helmetState.connectionStatus, icon: viewModel.helmetState.isConnected ? "checkmark.circle.fill" : "xmark.circle.fill", color: viewModel.helmetState.isConnected ? AppTheme.safe : AppTheme.danger)
                 Spacer()
                 HaloLogoView()
             }
@@ -134,12 +134,44 @@ struct RideView: View {
             }
             .padding(.horizontal, AppSpacing.large)
             .padding(.vertical, AppSpacing.small)
+
+            if viewModel.helmetState.frontBrakeActive {
+                brakeOverlay
+                    .transition(.scale.combined(with: .opacity))
+                    .allowsHitTesting(false)
+            }
         }
+        .animation(.easeInOut(duration: 0.18), value: viewModel.helmetState.frontBrakeActive)
+    }
+
+    private var brakeOverlay: some View {
+        VStack(spacing: 8) {
+            Image(systemName: "exclamationmark.octagon.fill").font(.system(size: 58, weight: .black))
+            Text("BRAKE!").font(.system(size: 58, weight: .black, design: .rounded))
+            if let object = viewModel.helmetState.frontDetectedObject {
+                Text("\(object) ahead".uppercased()).font(.headline.weight(.black))
+            }
+            HStack(spacing: 14) {
+                if let distance = viewModel.helmetState.frontDistanceMeters {
+                    Text(String(format: "%.1f m", distance))
+                }
+                if let ttc = viewModel.helmetState.frontTTCSeconds {
+                    Text(String(format: "%.1f s TTC", ttc))
+                }
+            }.font(.title3.weight(.bold))
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 34).padding(.vertical, 26)
+        .background(AppTheme.danger.opacity(0.96), in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 28).stroke(.white.opacity(0.8), lineWidth: 3))
+        .shadow(color: AppTheme.danger.opacity(0.55), radius: 24, y: 8)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Brake. \(viewModel.helmetState.frontReason ?? "Obstacle ahead")")
     }
 
     private var activeStatusBar: some View {
         HStack {
-            statusPill(viewModel.helmetState.isConnected ? "Helmet" : "Offline", icon: viewModel.helmetState.isConnected ? "checkmark.circle.fill" : "xmark.circle.fill", color: viewModel.helmetState.isConnected ? AppTheme.safe : AppTheme.danger)
+            statusPill(viewModel.helmetState.isConnected ? "Helmet online" : viewModel.helmetState.connectionStatus, icon: viewModel.helmetState.isConnected ? "checkmark.circle.fill" : "xmark.circle.fill", color: viewModel.helmetState.isConnected ? AppTheme.safe : AppTheme.danger)
             Spacer()
             HaloLogoView()
         }
@@ -179,6 +211,9 @@ struct RideView: View {
                 Spacer()
                 if let distance = viewModel.helmetState.estimatedDistance {
                     Label(String(format: "%.1f m", distance), systemImage: "ruler")
+                }
+                if let ttc = viewModel.helmetState.estimatedTTC {
+                    Label(String(format: "%.1f s", ttc), systemImage: "timer")
                 }
             }
             .font(.caption.weight(.semibold))
@@ -298,18 +333,9 @@ struct RideView: View {
     }
 
     private func recenterMap() {
-        guard let latitude = viewModel.location.latitude, let longitude = viewModel.location.longitude else {
-            cameraPosition = .userLocation(followsHeading: true, fallback: .automatic)
-            return
-        }
-        cameraPosition = .camera(
-            MapCamera(
-                centerCoordinate: CLLocationCoordinate2D(latitude: latitude, longitude: longitude),
-                distance: 280,
-                heading: viewModel.location.headingDegrees ?? 0,
-                pitch: 55
-            )
-        )
+        // A user-location camera remains attached to the blue dot as Core Location updates.
+        // A fixed MapCamera only centers once and then leaves the rider behind.
+        cameraPosition = .userLocation(followsHeading: true, fallback: .automatic)
     }
 
     private func statusPill(_ title: String, icon: String, color: Color) -> some View {

@@ -31,6 +31,13 @@ final class AppSettings: ObservableObject {
     var liveViewURL: URL? { normalizedBaseURL?.appendingPathComponent("view") }
     var cameraDebugURL: URL? { normalizedBaseURL }
 
+    func cameraStreamURL(_ camera: String) -> URL? {
+        guard let base = piURL(path: "/stream.mjpg"),
+              var components = URLComponents(url: base, resolvingAgainstBaseURL: false) else { return nil }
+        components.queryItems = [URLQueryItem(name: "camera", value: camera)]
+        return components.url
+    }
+
     func piURL(path: String) -> URL? {
         guard let base = normalizedBaseURL, var components = URLComponents(url: base, resolvingAgainstBaseURL: false) else { return nil }
         components.path = path.hasPrefix("/") ? path : "/" + path

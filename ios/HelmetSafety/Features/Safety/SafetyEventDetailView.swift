@@ -1,6 +1,7 @@
 import AVKit
 import MapKit
 import SwiftUI
+import WebKit
 
 struct SafetyEventDetailView: View {
     @StateObject private var viewModel: SafetyEventDetailViewModel
@@ -39,15 +40,17 @@ struct SafetyEventDetailView: View {
     }
 
     private var videoCard: some View {
-        DashboardCard(title: "Incident video") {
+        DashboardCard(title: "Camera evidence") {
             if let url = viewModel.event.videoURL, viewModel.event.hasPlayableVideo {
                 VideoPlayer(player: AVPlayer(url: url)).frame(height: 210).clipShape(RoundedRectangle(cornerRadius: 12))
+                Text("Dash-cam clip: approximately 15 seconds before and 15 seconds after the incident. Clips finish processing shortly after an event.")
+                    .font(.caption).foregroundStyle(AppTheme.secondaryText)
             } else {
                 VStack(spacing: 10) {
                     Image(systemName: "video.slash.fill").font(.system(size: 34)).foregroundStyle(AppTheme.secondaryText)
                     Text("Incident video unavailable from helmet").font(.headline).multilineTextAlignment(.center)
                     if let path = viewModel.event.videoPath {
-                        Text("The Pi recorded \(path), but does not expose saved clips over HTTP.").font(.caption).multilineTextAlignment(.center).foregroundStyle(AppTheme.secondaryText)
+                        Text("Incident recording ID: \(path). The clip may still be processing on the Pi.").font(.caption).multilineTextAlignment(.center).foregroundStyle(AppTheme.secondaryText)
                     } else {
                         Text("No retrievable clip URL was provided for this incident.").font(.caption).foregroundStyle(AppTheme.secondaryText)
                     }
@@ -61,7 +64,7 @@ struct SafetyEventDetailView: View {
             detailRow("Detected", viewModel.event.detectedObject ?? "Unavailable")
             detailRow("Camera", viewModel.event.cameraId ?? "Unavailable")
             detailRow("Side", viewModel.event.side?.rawValue.capitalized ?? "Unavailable")
-            detailRow("Distance", viewModel.event.estimatedDistanceMeters.map { String(format: "%.1f meters", $0) } ?? "Unavailable")
+            detailRow("Distance", viewModel.event.estimatedDistanceMeters.map { String(format: "%.0f feet", $0 * 3.28084) } ?? "Unavailable")
             detailRow("Confidence", viewModel.event.confidence.map { String(format: "%.0f%%", $0 * 100) } ?? "Unavailable")
             detailRow("Speed", viewModel.event.speed.map { String(format: "%.1f mph", $0) } ?? "Unavailable")
             if let latitude = viewModel.event.latitude, let longitude = viewModel.event.longitude {
@@ -72,10 +75,10 @@ struct SafetyEventDetailView: View {
     }
 
     private var analysisCard: some View {
-        DashboardCard(title: "AI incident analysis") {
+        DashboardCard(title: "CV incident analysis") {
             switch viewModel.analysisState {
             case .notAnalyzed:
-                Text("Analyze Pi-generated event metadata after the incident. AI is not used for realtime safety decisions.").font(.subheadline).foregroundStyle(AppTheme.secondaryText)
+                Text("Summarize the object, side, risk tier, distance, confidence, TTC, and ride context captured by the helmet.").font(.subheadline).foregroundStyle(AppTheme.secondaryText)
                 analyzeButton("Analyze Incident")
             case .analyzing:
                 HStack { ProgressView(); Text("Analyzing incident…") }

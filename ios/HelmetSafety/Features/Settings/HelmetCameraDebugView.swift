@@ -5,6 +5,7 @@ struct HelmetCameraDebugView: View {
     @ObservedObject var settings: AppSettings
     @State private var reloadID = UUID()
     @State private var status = "Ready to connect"
+    @State private var feed = CameraFeed.debug
 
     var body: some View {
         VStack(spacing: 0) {
@@ -18,7 +19,15 @@ struct HelmetCameraDebugView: View {
                 Button { reloadID = UUID() } label: { Label("Reconnect", systemImage: "arrow.clockwise") }
             }.padding()
 
-            if let url = settings.cameraDebugURL {
+            Picker("Camera", selection: $feed) {
+                ForEach(CameraFeed.allCases) { Text($0.label).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal)
+            .padding(.bottom, 10)
+            .onChange(of: feed) { _, _ in reloadID = UUID() }
+
+            if let url = feed.url(settings: settings) {
                 HelmetWebView(url: url, status: $status).id(reloadID)
             } else {
                 ContentUnavailableView("Invalid Pi endpoint", systemImage: "wifi.exclamationmark", description: Text("Enter a hostname or URL in Settings."))
@@ -27,6 +36,16 @@ struct HelmetCameraDebugView: View {
         .navigationTitle("Helmet Camera Debug")
         .navigationBarTitleDisplayMode(.inline)
         .background(AppTheme.background)
+    }
+}
+
+private enum CameraFeed: String, CaseIterable, Identifiable {
+    case debug, rear, front
+    var id: String { rawValue }
+    var label: String { rawValue.capitalized }
+    @MainActor
+    func url(settings: AppSettings) -> URL? {
+        self == .debug ? settings.cameraDebugURL : settings.cameraStreamURL(rawValue)
     }
 }
 

@@ -52,3 +52,13 @@ enum NavigationError: LocalizedError {
         }
     }
 }
+
+enum RouteTimeFormatter {
+    static func duration(_ seconds: TimeInterval) -> String {
+        let totalMinutes = max(1, Int((seconds / 60).rounded()))
+        guard totalMinutes >= 60 else { return "\(totalMinutes) min" }
+        let hours = totalMinutes / 60
+        let minutes = totalMinutes % 60
+        return minutes == 0 ? "\(hours) hr" : "\(hours) hr \(minutes) min"
+    }
+}

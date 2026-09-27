@@ -45,12 +45,16 @@ DEVICE = "cpu"                    # [restart] "mps" on Apple Silicon
 VEHICLE_CLASSES = {1: "bicycle", 2: "car", 3: "motorcycle", 5: "bus", 7: "truck"}   # COCO ids
 DEMO_PERSON_AS_VEHICLE = False    # True for the stationary demo: walking teammates count as "vehicles"
 DUPLICATE_IOU = 0.6               # same object labelled car AND truck -> keep the more confident box
+FRONT_CLASSES = {0: "person", 1: "bicycle", 2: "car", 3: "motorcycle", 5: "bus", 7: "truck", 56: "chair"}
+                                  # camera-only front warning (--collision without a calibration file)
 
-# Typical rear-view widths (m). Used for lateral offset and rough distance.
-CLASS_WIDTH_M = {"car": 1.8, "truck": 2.5, "bus": 2.55, "motorcycle": 0.8, "bicycle": 0.6, "person": 0.5}
+# Typical widths seen end-on (m). Used for lateral offset and rough distance.
+CLASS_WIDTH_M = {"car": 1.8, "truck": 2.5, "bus": 2.55, "motorcycle": 0.8, "bicycle": 0.6, "person": 0.5,
+                 "chair": 0.5}
 
 # Camera geometry (only affects the distance readout, not TTC or zones)
-HFOV_DEG = 64.0                   # C920 at 640x480 is roughly 60-70 deg; calibrate FOCAL_PX instead if you can
+HFOV_DEG = 53.5 if IS_PI else 64.0   # Pi: ov5647 Camera Module (640x480 mode is full width, ~53.5 deg).
+                                  # C920 at 640x480 is roughly 60-70 deg; calibrate FOCAL_PX instead if you can
 FOCAL_PX = None                   # set from calibration step 5: box_width_px * distance_m / real_width_m
 
 # ---------------------------------------------------------------- tracker
@@ -149,9 +153,9 @@ VOICE_QUERY_SECONDS = 3.0
 # ---------------------------------------------------------------- incident reports (dashcam)
 INCIDENT_ENABLED = True           # [restart] save a clip + report for each serious alert
 INCIDENT_MIN_TIER = 3             # 3 = HIGH alerts only; 2 = also MED (blind spot) alerts; manual marks always
-INCIDENT_PRE_S = 6.0              # seconds of video kept from BEFORE the alert
-INCIDENT_POST_S = 4.0             # seconds recorded AFTER it (extended if more alerts follow)
-INCIDENT_MAX_S = 20.0             # longest single incident (pre-roll not included)
+INCIDENT_PRE_S = 15.0             # seconds of video kept from BEFORE the alert
+INCIDENT_POST_S = 15.0            # seconds recorded AFTER it (extended if more alerts follow)
+INCIDENT_MAX_S = 30.0             # longest single incident (pre-roll not included)
 INCIDENT_COOLDOWN_S = 15.0        # the same vehicle can't open another incident this soon
 INCIDENT_FPS = 10                 # clip frame rate (lower = less CPU/storage)
 INCIDENT_FRAME_WIDTH = 480        # clip width in pixels (height keeps the aspect ratio)
@@ -167,7 +171,7 @@ INCIDENT_GEMINI_BUDGET = 30       # hard cap on incident analyses per session (s
 SERIAL_PORT = None                # None = auto-detect, or "COM5" / "/dev/cu.usbserial-1410"
 SERIAL_BAUD = 57600               # must match the sketch
 HEARTBEAT_S = 0.25
-BUZZERS_ENABLED = True            # buzzers beep with STRONG/FAULT buzzes; False for a quiet demo room
+BUZZERS_ENABLED = False           # optional piezo buzzers on the Arduino (2 chirps with a HIGH buzz); beeps use BEEP_*
 SONAR_MAX_CM = 300                # ultrasonic readings beyond this are treated as "nothing there"
 
 # ---------------------------------------------------------------- ultrasonic fusion (side sensors)
@@ -201,6 +205,17 @@ TTS_ENABLED = True
 TTS_RATE = 200                    # words per minute (macOS/Linux); Windows maps to SAPI rate
 TTS_PREFIX = ""                   # e.g. "Hey. " if your Bluetooth headset clips the first word
 
+# ---------------------------------------------------------------- beeps (same audio output as speech)
+# AirPods or any Bluetooth/USB speaker the Pi plays through. No buzzer hardware needed.
+BEEP_ENABLED = True
+BEEP_TIERS = (3,)                 # rear alert tiers that beep: 3 = HIGH (add 2 for MEDIUM too)
+BEEP_FRONT_BRAKE = True           # three quick, higher beeps when the front warning turns to BRAKE
+BEEP_REPEAT_S = 4.0               # the same warning (rear left/right/behind, front) beeps at most this often
+BEEP_MIN_GAP_S = 1.0              # a rear beep is skipped this soon after any other beep
+BEEP_VOLUME = 0.3                 # fraction of full scale; the earbuds' own volume still applies
+BEEP_KEEP_AWAKE = True            # keep the output open so Bluetooth doesn't cut off short beeps
+BEEP_LEAD_IN_S = 0.25             # silence before each beep when the output can't be kept open
+
 # ---------------------------------------------------------------- overlay
 PANEL_WIDTH = 400
 DISPLAY_SCALE = 1.0 if IS_PI else 1.3
@@ -212,4 +227,8 @@ STREAM_PORT = 8080 if IS_PI else None   # overlay + control buttons at http://<p
 STREAM_FPS = 8                    # web view refresh; costs CPU, keep it low on a Pi
 STREAM_JPEG_QUALITY = 70
 STREAM_TOKEN = ""                 # set a word to require http://<pi-ip>:8080/?t=<word> for the buttons
+VIEW_BEHIND_M = 12.0              # 2.5D view: draw rear traffic this far back (one camera's distance is too
+VIEW_AHEAD_M = 8.0                # rough beyond it) and front-camera objects this far ahead. Farther objects
+                                  # are hidden unless alerting; alerting ones are pinned at the edge with
+                                  # their time to contact. Bigger = more road, smaller models
 STATUS_PRINT_S = 2.0              # console status line when running headless

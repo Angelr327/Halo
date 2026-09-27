@@ -17,7 +17,7 @@ struct SafetyEventCard: View {
                 Label(event.side?.rawValue.capitalized ?? "Unknown side", systemImage: sideIcon)
                 Spacer()
                 if let distance = event.estimatedDistanceMeters {
-                    Label(String(format: "%.1f m", distance), systemImage: "ruler")
+                    Label(String(format: "%.0f ft", distance * 3.28084), systemImage: "ruler")
                 }
             }
             .font(.subheadline).foregroundStyle(AppTheme.secondaryText)
@@ -37,6 +37,8 @@ struct SafetyEventCard: View {
         case .vehicleApproach: "car.side.fill"
         case .closePass: "exclamationmark.triangle.fill"
         case .hardBrake: "brakesignal"
+        case .frontObstacle: "car.front.waves.up"
+        case .emergencyBrakeWarning: "exclamationmark.octagon.fill"
         case .possibleCollision, .collision: "exclamationmark.octagon.fill"
         case .manualRecording: "record.circle.fill"
         }
@@ -47,6 +49,7 @@ struct SafetyEventCard: View {
         case .left?: "arrow.left"
         case .right?: "arrow.right"
         case .rear?: "arrow.down"
+        case .front?: "arrow.up"
         case .unknown?, nil: "questionmark"
         }
     }

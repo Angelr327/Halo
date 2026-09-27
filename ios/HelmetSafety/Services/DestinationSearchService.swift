@@ -84,6 +84,11 @@ final class DestinationSearchService: NSObject, ObservableObject {
         errorMessage = nil
     }
 
+    func clearRecentHistory() {
+        recentDestinations = []
+        defaults.removeObject(forKey: Self.recentsKey)
+    }
+
     private func updateSuggestions() {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         errorMessage = nil

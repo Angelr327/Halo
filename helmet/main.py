@@ -29,7 +29,7 @@ from .fusion import SonarFusion
 from .hud import Hud
 from .incidents import IncidentRecorder
 from . import snapshot
-from .outputs import HelmetLink, Speaker
+from .outputs import Beeper, HelmetLink, Speaker
 from .overlay import Overlay
 from .perception import CENTER, LEFT, RIGHT, GlobalMotion, Tracker, VehicleDetector, update_metrics
 from .risk import SPOKEN_LABEL, AlertPolicy, SceneTrigger
@@ -53,8 +53,10 @@ def parse_args():
     ap.add_argument("--no-realtime", action="store_true", help="process every video frame (slower than real time)")
     ap.add_argument("--loop", action="store_true", help="loop the video")
     ap.add_argument("--camera", type=int, default=None, help="camera index")
-    ap.add_argument("--collision", action="store_true", help="enable calibrated helmet-front chair collision demo")
-    ap.add_argument("--collision-calibration", help="measured front camera/marker/alignment JSON (tools.calibrate_front)")
+    ap.add_argument("--collision", action="store_true",
+                    help="front camera BRAKE warning: camera-only by default, marker mode with --collision-calibration")
+    ap.add_argument("--collision-calibration", help="marker mode: measured front camera/marker/alignment JSON "
+                                                    "(tools.calibrate_front); omit for camera-only")
     ap.add_argument("--collision-log", help="write forward measurements and decisions as JSON lines")
     ap.add_argument("--front-camera", type=int, default=cfg.FRONT_CAMERA_INDEX,
                     help="front camera index for the web preview and collision mode")
@@ -63,7 +65,9 @@ def parse_args():
     ap.add_argument("--port", help="Arduino serial port (default: auto-detect)")
     ap.add_argument("--no-gemini", action="store_true")
     ap.add_argument("--no-hud", action="store_true", help="don't drive the transparent OLED")
-    ap.add_argument("--sim", action="store_true", help="scripted traffic instead of the camera (no YOLO); web view on")
+    ap.add_argument("--sim", action="store_true",
+                    help="scripted traffic instead of the cameras (no YOLO): front and rear, web view on")
+    ap.add_argument("--rear-only", action="store_true", help="with --sim: script only the rear camera")
     ap.add_argument("--agent", action="store_true", help="Gemini tool-calling mode")
     ap.add_argument("--demo-person", action="store_true", help="count people as vehicles (stationary demo)")
     ap.add_argument("--demo-chair", action="store_true",
@@ -77,19 +81,25 @@ def parse_args():
     args = ap.parse_args()
     if args.demo_chair:
         if args.collision or args.collision_calibration or args.collision_log:
-            ap.error("--demo-chair is separate from the calibrated --collision mode")
+            ap.error("--demo-chair is separate from the --collision modes")
         if args.sim or args.video or args.front_video:
             ap.error("--demo-chair uses live front and rear cameras")
         if args.front_camera == (cfg.CAMERA_INDEX if args.camera is None else args.camera):
             ap.error("front and rear camera indices must differ")
+    if args.rear_only and (not args.sim or args.collision):
+        ap.error("--rear-only goes with --sim, without --collision")
+    if args.sim and not args.rear_only:
+        args.collision = True                     # the simulator scripts the front camera too
+    if args.collision_calibration and not args.collision:
+        ap.error("--collision-calibration requires --collision")
     if args.collision:
-        if not args.collision_calibration:
-            ap.error("--collision requires --collision-calibration")
-        if args.sim:
-            ap.error("--collision uses live cameras or paired videos, not the rear-only --sim")
-        if bool(args.video) != bool(args.front_video):
+        if args.sim and args.collision_calibration:
+            ap.error("marker mode needs real marker images; use --sim --collision without a calibration")
+        if args.sim and (args.video or args.front_video):
+            ap.error("--sim scripts both cameras; don't pass videos")
+        if not args.sim and bool(args.video) != bool(args.front_video):
             ap.error("collision replay requires both --video and --front-video")
-        if not args.video and args.front_camera == (cfg.CAMERA_INDEX if args.camera is None else args.camera):
+        if not (args.video or args.sim) and args.front_camera == (cfg.CAMERA_INDEX if args.camera is None else args.camera):
             ap.error("front and rear camera indices must differ")
     elif args.front_video:
         ap.error("--front-video requires --collision")
@@ -174,7 +184,7 @@ def main():
     args = parse_args()
     load_dotenv()
     apply_overrides(args)
-    if args.collision:
+    if args.collision_calibration:
         from .collision import Calibration
         Calibration.load(args.collision_calibration)  # fail before opening hardware
 
@@ -189,6 +199,7 @@ def main():
         detector = VehicleDetector()
     motion, tracker, policy, scene = GlobalMotion(), Tracker(), AlertPolicy(), SceneTrigger()
     link, speaker, gateway, overlay = HelmetLink(args.port), Speaker(), GeminiGateway(), Overlay()
+    beeper = Beeper()
     hud = Hud(enabled=not args.no_hud)
     forward = None
     if args.collision or args.demo_chair:
@@ -204,8 +215,13 @@ def main():
             hud.close()
             link.close()
             raise
-        print("Front chair demo: no marker or calibration; tree placement is illustrative" if args.demo_chair
-              else "Front collision demo: stationary marked chair, straight approach, look ahead")
+        if args.demo_chair:
+            print("Front chair demo: no marker or calibration; tree placement is illustrative")
+        elif forward.mode == "marker":
+            print("Front collision demo: stationary marked chair, straight approach, look ahead")
+        else:
+            print("Front warning: camera-only (no calibration): BRAKE when an object ahead is "
+                  f"{forward.settings.brake_ttc_s:.1f} s from contact")
     fusion = SonarFusion()
     recorder = IncidentRecorder(client=gateway.client)
     st = State()
@@ -216,7 +232,9 @@ def main():
         streamer.incidents = recorder
         if forward is None:
             rear_index = cfg.CAMERA_INDEX if args.camera is None else args.camera
-            if args.sim or args.video:
+            if args.sim:
+                streamer.publish_camera("front", None, unavailable="Rear only (--rear-only)")
+            elif args.video:
                 streamer.publish_camera("front", None, unavailable="No front feed in this run")
             elif args.front_camera == rear_index:
                 streamer.publish_camera("front", None, unavailable="Choose a different front camera")
@@ -227,7 +245,7 @@ def main():
                     publish=lambda frame: streamer.publish_camera("front", frame))
     print(f"Detector: {detector.model_name} @ {cfg.IMGSZ} | Camera: {type(source).__name__} | "
           f"Serial: {link.status} | Gemini: {gateway.status if not gateway.available else cfg.GEMINI_MODEL}")
-    print(f"HUD: {hud.status}")
+    print(f"HUD: {hud.status} | Beeps: {beeper.status}")
     if streamer:
         tok = f"?t={cfg.STREAM_TOKEN}" if cfg.STREAM_TOKEN else ""
         print(f"Web view: http://{local_ip()}:{cfg.STREAM_PORT}/{tok}")
@@ -273,7 +291,9 @@ def main():
 
     def execute_fire(f):
         link.buzz(f.side, f.tier)
-        print(f"[ALERT] t={f.t:.2f} #{f.track_id} {f.label} {f.zone} tier={f.tier} ({f.reason})")
+        beeped = beeper.rear(f.tier, f.side)
+        print(f"[ALERT] t={f.t:.2f} #{f.track_id} {f.label} {f.zone} tier={f.tier} ({f.reason})"
+              + (" + beep" if beeped else ""))
         if f.tier == 3 and policy.may_speak_local(f.t):
             speaker.say(f.phrase(), priority=0, max_age=1.5, source="local")
         wants = f.tier in cfg.DESCRIBE_TIERS or (f.tier == 2 and f.label in cfg.DESCRIBE_MEDIUM_FOR)
@@ -347,7 +367,8 @@ def main():
             captions=speaker.captions, scene=getattr(source, "title", None), contacts=fusion.contacts,
             collision=hud.collision,
             front_demo=forward.snapshot() if args.demo_chair else None,
-            incidents={"latest": recorder.latest_id, "recording": recorder.recording}))
+            incidents={"latest": recorder.latest_id, "recording": recorder.recording,
+                       "current": recorder.active_reference}))
 
     def poll_key():
         k = cv2.waitKey(1) & 0xFF if not headless else 255
@@ -380,6 +401,9 @@ def main():
         elif key == ord("t"):
             st.scheduled += [(nonlocal_now, "L2"), (nonlocal_now + 0.8, "R2"), (nonlocal_now + 1.6, "B3")]
             speaker.say("Left. Right. Both.", priority=2, max_age=3, source="system")
+        elif key == ord("b"):
+            print(f"beep test (rear left, rear right, front BRAKE): {beeper.status}")
+            beeper.test()
         elif key == ord("l"):
             seq = [None, 0, 1, 2]
             st.light_override = seq[(seq.index(st.light_override) + 1) % len(seq)]
@@ -428,6 +452,9 @@ def main():
         while running:
             frame, t = (None, None) if st.sim_fault else source.read(timeout=0.1)
             now = time.monotonic()
+            if forward is not None:
+                if beeper.front(hud.collision, now):              # BRAKE beeps even if the rear stalls
+                    print("[BEEP] front BRAKE")
             if streamer and forward is not None:
                 front_frame, captured_at = forward.camera_frame()
                 streamer.publish_camera("front", front_frame, captured_at=captured_at if source.is_live else now)
@@ -553,6 +580,7 @@ def main():
         if log_file:
             log_file.close()
         link.close()
+        beeper.close()
         hud.close()
         recorder.close()
         source.release()

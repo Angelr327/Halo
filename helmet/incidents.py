@@ -116,6 +116,12 @@ class IncidentRecorder:
     def recording(self):
         return self.open is not None
 
+    @property
+    def active_reference(self):
+        """Small telemetry reference for associating a live HIGH alert with its eventual clip."""
+        o = self.open
+        return None if o is None else {"id": o.id, "track_id": o.track_id, "tier": o.peak_tier}
+
     def add_frame(self, frame, t, tracks=(), contacts=()):
         """Buffer one rider-view frame (throttled to INCIDENT_FPS) and update the open incident."""
         if not self.enabled or frame is None:

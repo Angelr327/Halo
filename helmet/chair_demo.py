@@ -12,6 +12,9 @@ from .perception import Tracker
 
 
 class ChairDemo:
+    mode = "chair-demo"
+    front_classes = {56: "chair"}
+
     def __init__(self):
         self.lock = threading.RLock()
         self.tracker = Tracker()
@@ -31,6 +34,16 @@ class ChairDemo:
         with self.lock:
             self.frame, self.frame_received_at = frame, time.monotonic() - age_s
         return frame.shape[1], frame.shape[0]
+
+    # The dual-camera worker's front-engine interface (same as ForwardEngine / MonoFrontEngine).
+    def measure(self, frame):
+        return frame.shape[1], frame.shape[0]
+
+    def on_frame(self, frame, t, meas=None, age_s=0.0):
+        self.capture(frame, t, age_s=age_s)
+
+    def on_detections(self, dets, t, meas, frame, age_s=0.0):
+        self.associate(dets, t, meas)
 
     def associate(self, detections, t, frame_size):
         # The inference result must still describe the live scene when it arrives.
