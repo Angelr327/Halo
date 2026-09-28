@@ -1,4 +1,4 @@
-Created by: Angel Rodriguez, Bill Quach, Jason Ngyuen, and Sion King
+Created by: Angel Rodriguez, Bill Quach, Jason Nguyen, and Sion King
 
 # Blind-spot helmet
 🏆 1st Place — Waymo Mobility Challenge at ShellHacks 2026 (77 teams)  
