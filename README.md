@@ -1,6 +1,8 @@
-Created by: Sion King
+Created by: Angel Rodriguez, Bill Quach, Jason Ngyuen, and Sion King
 
 # Blind-spot helmet
+🏆 1st Place — Waymo Mobility Challenge at ShellHacks 2026 (77 teams)  
+🏆 1st Place — State Farm Challenge at ShellHacks 2026 (34 teams)
 
 A bike helmet that watches the road behind you. A rear camera runs YOLO on a Raspberry Pi, and
 the helmet warns you with left or right vibration, a short beep in your earbuds for the most
